@@ -192,6 +192,38 @@ class InventoryModule(BaseInventoryPlugin):
         
         print(f"✅ Limpeza final concluída. Hosts restantes: {len(self.inventory.hosts)}")
 
+    def _monkey_patch_awx_injection(self):
+        """Monkey patch para interceptar injeção de variáveis do AWX"""
+        print("🐒 Aplicando monkey patch para bloquear injeção AWX...")
+        
+        # Salvar referência original do método set_variable
+        original_set_variable = self.inventory.set_variable
+        
+        def blocked_set_variable(host, var, value):
+            """Versão bloqueada do set_variable que filtra variáveis AWX"""
+            # Lista de variáveis a serem bloqueadas
+            blocked_vars = [
+                'remote_host_enabled', 'remote_host_id', 'remote_tower_enabled', 'remote_tower_id',
+                'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id'
+            ]
+            
+            # Bloquear variáveis problemáticas
+            if var in blocked_vars:
+                print(f"🚫 BLOQUEADO: Tentativa de injetar {var}={value} no host {host}")
+                return  # NÃO adicionar a variável
+            
+            # Bloquear valores que contenham sequências problemáticas
+            if isinstance(value, str) and any(problem in str(value) for problem in ['564dba5b-c886-5576-5ce2-8e7f4889d270', '}}}}', '"remote_']):
+                print(f"🚫 BLOQUEADO: Variável {var} com valor suspeito no host {host}")
+                return  # NÃO adicionar a variável
+            
+            # Se passou nos filtros, permitir
+            return original_set_variable(host, var, value)
+        
+        # Aplicar o monkey patch
+        self.inventory.set_variable = blocked_set_variable
+        print("✅ Monkey patch aplicado com sucesso")
+
     def parse(self, inventory, loader, path, cache=True):
         self.inventory = inventory
         self.loader = loader
@@ -338,3 +370,6 @@ class InventoryModule(BaseInventoryPlugin):
         
         # Limpeza final - remover qualquer host que ainda tenha problemas
         self._final_cleanup()
+        
+        # ÚLTIMA tentativa - interceptar método get_option para bloquear injeção AWX
+        self._monkey_patch_awx_injection()

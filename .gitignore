@@ -1,0 +1,7 @@
+# Arquivo de ambiente local
+.env
+*.log
+__pycache__/
+__pycache__/
+*.pyc
+.env

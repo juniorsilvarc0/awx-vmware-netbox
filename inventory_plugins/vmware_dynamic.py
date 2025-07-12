@@ -52,31 +52,52 @@ class InventoryModule(BaseInventoryPlugin):
 
     def _cleanup_awx_variables(self):
         """Remove variáveis problemáticas que o AWX pode injetar automaticamente"""
-        problematic_vars = [
-            'remote_host_enabled', 'remote_host_id', 
-            'remote_tower_enabled', 'remote_tower_id',
-            'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id',
-            'ansible_host_key_checking', 'ansible_ssh_common_args',
-            'ansible_ssh_extra_args', 'ansible_connection_timeout'
-        ]
+        print("🧹 Executando limpeza agressiva de variáveis AWX...")
         
         for host_name in list(self.inventory.hosts.keys()):
             host = self.inventory.hosts[host_name]
             # Criar cópia das variáveis para iteração segura
             vars_to_remove = []
-            for var_name, var_value in host.vars.items():
-                # Remover variáveis problemáticas conhecidas
+            
+            for var_name, var_value in list(host.vars.items()):
+                should_remove = False
+                
+                # 1. Remover qualquer variável que comece com padrões AWX
+                if any(var_name.startswith(prefix) for prefix in ['remote_', 'tower_', 'awx_']):
+                    should_remove = True
+                    print(f"🚫 Removendo variável AWX: {var_name} do host {host_name}")
+                
+                # 2. Remover variáveis problemáticas específicas
+                problematic_vars = [
+                    'remote_host_enabled', 'remote_host_id', 'remote_tower_enabled', 'remote_tower_id',
+                    'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id', 'ansible_host_key_checking',
+                    'ansible_ssh_common_args', 'ansible_ssh_extra_args', 'ansible_connection_timeout'
+                ]
                 if var_name in problematic_vars:
+                    should_remove = True
+                    print(f"🚫 Removendo variável problemática: {var_name} do host {host_name}")
+                
+                # 3. Remover variáveis com valores que contêm caracteres problemáticos
+                if isinstance(var_value, str):
+                    problematic_patterns = ['"}}}}', '"}', "'}", "{{", "}}", '564dba5b-c886-5576-5ce2-8e7f4889d270']
+                    if any(pattern in var_value for pattern in problematic_patterns):
+                        should_remove = True
+                        print(f"🚫 Removendo variável com padrão problemático: {var_name} do host {host_name}")
+                
+                # 4. Remover variáveis com IDs suspeitos
+                if isinstance(var_value, (int, str)) and str(var_value) in ['1063', '1064']:
+                    should_remove = True
+                    print(f"🚫 Removendo variável com ID suspeito: {var_name}={var_value} do host {host_name}")
+                
+                if should_remove:
                     vars_to_remove.append(var_name)
-                # Remover variáveis com valores que contêm caracteres problemáticos
-                elif isinstance(var_value, str):
-                    if any(char in var_value for char in ['"}}}}', '"}', "'}", "{{", "}}"]):
-                        print(f"Removendo variável problemática {var_name} do host {host_name}")
-                        vars_to_remove.append(var_name)
             
             # Remover variáveis identificadas
             for var_name in vars_to_remove:
-                del host.vars[var_name]
+                if var_name in host.vars:
+                    del host.vars[var_name]
+        
+        print(f"✅ Limpeza concluída para {len(self.inventory.hosts)} hosts")
 
     def _validate_inventory_json(self):
         """Valida se o inventário pode ser serializado como JSON válido"""
@@ -116,25 +137,60 @@ class InventoryModule(BaseInventoryPlugin):
             self.inventory.remove_host(host_name)
     
     def _final_cleanup(self):
-        """Limpeza final para garantir que não há variáveis problemáticas"""
+        """Limpeza final AGRESSIVA para garantir JSON válido"""
+        print("🔥 Executando limpeza final agressiva...")
+        
+        hosts_to_remove = []
         for host_name in list(self.inventory.hosts.keys()):
             host = self.inventory.hosts[host_name]
             vars_to_remove = []
             
-            for var_name, var_value in host.vars.items():
-                # Verificar se a variável contém a sequência problemática do erro
+            # Lista COMPLETA de todas as variáveis e padrões problemáticos
+            for var_name, var_value in list(host.vars.items()):
+                should_remove = False
+                
+                # Remover QUALQUER variável AWX/Tower/Remote
+                awx_patterns = ['remote_', 'tower_', 'awx_', 'ansible_host_key', 'ansible_ssh']
+                if any(pattern in var_name.lower() for pattern in awx_patterns):
+                    should_remove = True
+                
+                # Remover variáveis com valores suspeitos
                 if isinstance(var_value, str):
-                    if any(problem in var_value for problem in ['564dba5b-c886-5576-5ce2-8e7f4889d270', 
-                                                               '"remote_host_enabled"',
-                                                               '"remote_tower_enabled"',
-                                                               '}}}}',
-                                                               'No closing quotation']):
-                        vars_to_remove.append(var_name)
-                        print(f"Removendo variável final problemática {var_name} do host {host_name}")
+                    suspicious_content = [
+                        '564dba5b-c886-5576-5ce2-8e7f4889d270', '564d8ad9-0b54-c1b0-7658-8a0fd40a73f1',
+                        '"remote_host_enabled"', '"remote_tower_enabled"', '}}}}', 'No closing quotation',
+                        '"}}', '"}', '{{', '}}'
+                    ]
+                    if any(content in str(var_value) for content in suspicious_content):
+                        should_remove = True
+                
+                # Remover IDs específicos problemáticos
+                if var_name in ['remote_host_id', 'remote_tower_id'] or str(var_value) in ['1063', '1064']:
+                    should_remove = True
+                
+                if should_remove:
+                    vars_to_remove.append(var_name)
+                    print(f"🔥 REMOVENDO FINAL: {var_name}={var_value} do host {host_name}")
             
-            # Remover variáveis identificadas
+            # Aplicar remoções
             for var_name in vars_to_remove:
-                del host.vars[var_name]
+                if var_name in host.vars:
+                    del host.vars[var_name]
+            
+            # Teste final de serialização JSON
+            try:
+                test_data = {host_name: dict(host.vars)}
+                json.dumps(test_data)
+            except (TypeError, ValueError, UnicodeDecodeError) as e:
+                print(f"❌ Host {host_name} ainda tem problemas de JSON, removendo completamente: {e}")
+                hosts_to_remove.append(host_name)
+        
+        # Remover hosts que ainda têm problemas
+        for host_name in hosts_to_remove:
+            self.inventory.remove_host(host_name)
+            print(f"🗑️ Removido host problemático: {host_name}")
+        
+        print(f"✅ Limpeza final concluída. Hosts restantes: {len(self.inventory.hosts)}")
 
     def parse(self, inventory, loader, path, cache=True):
         self.inventory = inventory
@@ -231,15 +287,21 @@ class InventoryModule(BaseInventoryPlugin):
                 
                 self.inventory.add_host(safe_name)
                 
-                # Filtrar variáveis problemáticas do AWX
-                excluded_vars = ['remote_host_enabled', 'remote_host_id', 'remote_tower_enabled', 'remote_tower_id']
+                # Adicionar apenas variáveis VMware válidas, NUNCA variáveis do AWX
+                awx_blocked_vars = [
+                    'remote_host_enabled', 'remote_host_id', 'remote_tower_enabled', 'remote_tower_id',
+                    'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id', 
+                    'ansible_host_key_checking', 'ansible_ssh_common_args'
+                ]
                 
                 for k, v in vm_data.items():
-                    if v is not None and k not in excluded_vars:  # Filtrar variáveis nulas e problemáticas
+                    if v is not None and k not in awx_blocked_vars:
                         # Sanitizar valores que podem conter caracteres especiais
                         if isinstance(v, str):
                             v = self._sanitize_string(v)
-                        self.inventory.set_variable(safe_name, k, v)
+                        # Validar se não é uma variável AWX injetada
+                        if not any(blocked in str(k).lower() for blocked in ['remote_', 'tower_', 'awx_']):
+                            self.inventory.set_variable(safe_name, k, v)
 
                 # Criar grupos por estado de energia
                 if runtime and runtime.powerState == 'poweredOn':

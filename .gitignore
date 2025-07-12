@@ -1,7 +1,25 @@
-# Arquivo de ambiente local
-.env
-*.log
-__pycache__/
+# Python cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
+# Environment files
 .env
+.env.local
+.env.production
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary files
+*.tmp
+*.log
+
+# Cache
+.cache/
+*.cache
+EOF < /dev/null

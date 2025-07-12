@@ -100,5 +100,24 @@ class InventoryModule(BaseInventoryPlugin):
             for k, v in vm_data.items():
                 self.inventory.set_variable(name, k, v)
 
+            # Criar grupos por estado de energia
+            if runtime.powerState == 'poweredOn':
+                self.inventory.add_group('powered_on')
+                self.inventory.add_child('powered_on', name)
+            elif runtime.powerState == 'poweredOff':
+                self.inventory.add_group('powered_off')
+                self.inventory.add_child('powered_off', name)
+            elif runtime.powerState == 'suspended':
+                self.inventory.add_group('suspended')
+                self.inventory.add_child('suspended', name)
+
+            # Criar grupos por sistema operacional
+            if vm_data['vm_is_windows']:
+                self.inventory.add_group('windows')
+                self.inventory.add_child('windows', name)
+            elif vm_data['vm_is_linux']:
+                self.inventory.add_group('linux')
+                self.inventory.add_child('linux', name)
+
         container.Destroy()
         Disconnect(si)

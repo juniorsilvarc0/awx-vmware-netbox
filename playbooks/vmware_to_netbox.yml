@@ -3,13 +3,13 @@
 # Arquivo: playbooks/vmware_to_netbox.yml
 
 - name: 🌐 Sincronizar VMs VMware para NetBox
-  hosts: vmware_vms
+  hosts: all
   gather_facts: false
   vars:
     ansible_connection: local
-    # Configurações do NetBox (serão sobrescritas pelas credenciais do AWX)
-    netbox_url: "{{ netbox_api_url | default('http://177.93.133.239:8000') }}"
-    netbox_token: "{{ netbox_api_token | default('2e6be1f776b91aa3849dc3723632983e4a80443a') }}"
+    # Configurações do NetBox (fornecidas via Custom Credential "Netbox Credentials")
+    netbox_url: "{{ lookup('env', 'NETBOX_API') }}"
+    netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
 
     # Configurações de sincronização
     batch_size: 50
@@ -24,9 +24,28 @@
           🌐 SINCRONIZAÇÃO VMWARE → NETBOX
           ================================
           🎯 Total de VMs para processar: {{ ansible_play_hosts | length }}
+          ✅ VMs Ligadas (poweredOn → Active): {{ groups['powered_on'] | default([]) | length }}
+          ❌ VMs Desligadas (poweredOff → Offline): {{ groups['powered_off'] | default([]) | length }}
+          ⏸️  VMs Suspensas (suspended → Staged): {{ groups['suspended'] | default([]) | length }}
           🔗 NetBox URL: {{ netbox_url }}
           🔄 Modo: {{ 'DRY RUN' if dry_run else 'PRODUÇÃO' }}
           📦 Tamanho do lote: {{ batch_size }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: 🔄 Exibir mapeamento de status VMware → NetBox
+      debug:
+        msg: |
+          📋 MAPEAMENTO DE STATUS:
+          ======================
+          ✅ poweredOn (VMware) → active (NetBox)
+          ❌ poweredOff (VMware) → offline (NetBox)  
+          ⏸️  suspended (VMware) → staged (NetBox)
+          
+          📊 DISTRIBUIÇÃO ATUAL:
+          • VMs que ficarão Active: {{ groups['powered_on'] | default([]) | length }}
+          • VMs que ficarão Offline: {{ groups['powered_off'] | default([]) | length }}
+          • VMs que ficarão Staged: {{ groups['suspended'] | default([]) | length }}
       run_once: true
       delegate_to: localhost
 

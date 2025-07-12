@@ -4,6 +4,7 @@ __metaclass__ = type
 import os
 import ssl
 import re
+import json
 from ansible.plugins.inventory import BaseInventoryPlugin
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
@@ -19,11 +20,66 @@ class InventoryModule(BaseInventoryPlugin):
         if value is None:
             return None
         if isinstance(value, str):
-            # Remove caracteres de controle e aspas problemáticas
+            # Remove caracteres de controle, aspas problemáticas e outros caracteres especiais
             value = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', value)
-            value = value.replace('"', "'").replace('\n', ' ').replace('\r', ' ')
+            value = value.replace('"', "'").replace("'", "").replace('\n', ' ').replace('\r', ' ')
+            value = value.replace('\\', '/').replace('{', '').replace('}', '')
+            # Remove espaços múltiplos e caracteres não ASCII problemáticos
+            value = re.sub(r'\s+', ' ', value)
+            value = re.sub(r'[^\x20-\x7E]', '', value)  # Apenas ASCII printável
             return value.strip()
         return value
+
+    def _cleanup_awx_variables(self):
+        """Remove variáveis problemáticas que o AWX pode injetar automaticamente"""
+        problematic_vars = [
+            'remote_host_enabled', 'remote_host_id', 
+            'remote_tower_enabled', 'remote_tower_id',
+            'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id'
+        ]
+        
+        for host_name in self.inventory.hosts:
+            host = self.inventory.hosts[host_name]
+            for var in problematic_vars:
+                if var in host.vars:
+                    del host.vars[var]
+
+    def _validate_inventory_json(self):
+        """Valida se o inventário pode ser serializado como JSON válido"""
+        try:
+            # Tenta serializar o inventário como JSON
+            inventory_dict = {}
+            for host_name in self.inventory.hosts:
+                host = self.inventory.hosts[host_name]
+                host_vars = {}
+                for k, v in host.vars.items():
+                    # Garantir que todos os valores são JSON serializáveis
+                    if isinstance(v, str):
+                        v = self._sanitize_string(v)
+                    host_vars[k] = v
+                inventory_dict[host_name] = host_vars
+            
+            # Testa serialização JSON
+            json.dumps(inventory_dict)
+            
+        except (TypeError, ValueError) as e:
+            print(f"Aviso: Problema de serialização JSON detectado: {e}")
+            # Remove hosts problemáticos se necessário
+            self._remove_problematic_hosts()
+
+    def _remove_problematic_hosts(self):
+        """Remove hosts que não podem ser serializados como JSON"""
+        hosts_to_remove = []
+        for host_name in self.inventory.hosts:
+            try:
+                host = self.inventory.hosts[host_name]
+                json.dumps(dict(host.vars))
+            except (TypeError, ValueError):
+                hosts_to_remove.append(host_name)
+                print(f"Removendo host problemático: {host_name}")
+        
+        for host_name in hosts_to_remove:
+            self.inventory.remove_host(host_name)
 
     def parse(self, inventory, loader, path, cache=True):
         self.inventory = inventory
@@ -119,8 +175,15 @@ class InventoryModule(BaseInventoryPlugin):
                     safe_name = f"vm_{config.uuid[:8]}" if config and config.uuid else f"unknown_vm_{len(self.inventory.hosts)}"
                 
                 self.inventory.add_host(safe_name)
+                
+                # Filtrar variáveis problemáticas do AWX
+                excluded_vars = ['remote_host_enabled', 'remote_host_id', 'remote_tower_enabled', 'remote_tower_id']
+                
                 for k, v in vm_data.items():
-                    if v is not None:  # Só adicionar variáveis não-nulas
+                    if v is not None and k not in excluded_vars:  # Filtrar variáveis nulas e problemáticas
+                        # Sanitizar valores que podem conter caracteres especiais
+                        if isinstance(v, str):
+                            v = self._sanitize_string(v)
                         self.inventory.set_variable(safe_name, k, v)
 
                 # Criar grupos por estado de energia
@@ -149,3 +212,9 @@ class InventoryModule(BaseInventoryPlugin):
 
         container.Destroy()
         Disconnect(si)
+        
+        # Limpar variáveis problemáticas que o AWX pode injetar
+        self._cleanup_awx_variables()
+        
+        # Validação final de integridade JSON
+        self._validate_inventory_json()

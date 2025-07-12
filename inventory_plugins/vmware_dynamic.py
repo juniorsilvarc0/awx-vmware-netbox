@@ -18,10 +18,10 @@ class InventoryModule(BaseInventoryPlugin):
         self.loader = loader
 
         vcenter_config = {
-            'host': os.environ.get('VMWARE_HOST', os.environ.get('VCENTER_HOST')),
-            'user': os.environ.get('VMWARE_USER', os.environ.get('VCENTER_USERNAME')),
-            'pwd': os.environ.get('VMWARE_PASSWORD'),
-            'port': int(os.environ.get('VMWARE_PORT', 443)),
+            'host': os.environ.get('VCENTER_HOST'),
+            'user': os.environ.get('VCENTER_USER'),
+            'pwd': os.environ.get('VCENTER_PASSWORD'),
+            'port': int(os.environ.get('VCENTER_PORT', 443)),
             'datacenter': os.environ.get('DATACENTER_NAME')
         }
 

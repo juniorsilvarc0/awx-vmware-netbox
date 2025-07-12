@@ -1,27 +1,9 @@
 ---
-# Variáveis específicas para VMs Linux
-# Arquivo: inventories/vmware/group_vars/linux.yml
-
-# Configurações de conexão SSH
-ansible_connection: ssh
-ansible_port: 22
-ansible_become: true
-ansible_become_method: sudo
-
-# Credenciais (substituir por credenciais do AWX)
-ansible_user: "{{ vault_linux_user | default('ansible') }}"
-ansible_ssh_private_key_file: "{{ vault_ssh_private_key | default('~/.ssh/id_rsa') }}"
-ansible_ssh_pass: "{{ vault_linux_password | default(omit) }}"
-ansible_become_pass: "{{ vault_sudo_password | default(omit) }}"
-
-# Configurações SSH específicas
-ansible_ssh_common_args: >-
-  -o StrictHostKeyChecking=no
-  -o UserKnownHostsFile=/dev/null
-  -o ControlMaster=auto
-  -o ControlPersist=60s
-  -o ServerAliveInterval=60
-  -o ServerAliveCountMax=3
+# Variáveis específicas para VMs Linux - SOMENTE LEITURA
+# Arquivo: group_vars/linux.yml
+# 
+# IMPORTANTE: Este arquivo contém APENAS variáveis classificativas.
+# Configurações de conexão são gerenciadas pelo AWX.
 
 # Identificação do SO
 os_family: "Linux"

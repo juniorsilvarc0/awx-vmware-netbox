@@ -276,17 +276,25 @@
         - not dry_run
         - interfaces_com_ip | length > 0
 
-    - name: 🔗 Montar mapeamento IP ↔ interface
+    - name: 🔗 Montar mapeamento IP ↔ interface (com validação)
       set_fact:
         ip_interface_map: "{{ ip_interface_map | default([]) + [ new_map ] }}"
       vars:
         iface_name: "{{ item.0.0.name }}"
-        ip_id: "{{ item.1.json.results[0].id }}"
+        # Validação segura do acesso ao JSON
+        ip_id: >-
+          {{ (item.1.json.results[0].id if (item.1 is defined and 
+                                           item.1.json is defined and 
+                                           item.1.json.results is defined and 
+                                           item.1.json.results | length > 0) 
+              else omit) }}
         iface_id: >-
-          {{ vm_interfaces.json.results
+          {{ (vm_interfaces.json.results
              | selectattr('name', 'equalto', iface_name)
              | map(attribute='id')
-             | first }}
+             | first) if (vm_interfaces.json is defined and 
+                         vm_interfaces.json.results is defined) 
+             else omit }}
         new_map:
           ip_id: "{{ ip_id }}"
           iface_id: "{{ iface_id }}"
@@ -296,6 +304,8 @@
       when: 
         - not dry_run
         - interfaces_com_ip | length > 0
+        - ip_id is defined and ip_id != omit
+        - iface_id is defined and iface_id != omit
 
     - name: 🔗 Associar IPs às interfaces
       uri:

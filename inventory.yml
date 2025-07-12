@@ -1,2 +1,1 @@
-#!/usr/bin/env bash
-exec /usr/bin/env python3 "$(dirname "$0")/scripts/vmware_dynamic_inventory.py" "$@"
+plugin: vmware_dynamic

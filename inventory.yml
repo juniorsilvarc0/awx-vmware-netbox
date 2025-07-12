@@ -1,14 +1,43 @@
-all:
-  children:
-    vmware:
-      hosts:
-      vars:
-        vcenter_hostname: "vcsa04.ati.pi.gov.br"
-        datacenter_name: "ATI-SLC-HCI"
-        validate_certs: false
-    powered_on:
-      hosts:
-    windows:
-      hosts:
-    linux:
-      hosts:
+plugin: vmware.vmware.vms
+validate_certs: false
+gather_tags: true
+
+properties:
+  - name
+  - config.uuid
+  - config.guestFullName
+  - config.template
+  - runtime.powerState
+  - summary.config.numCpu
+  - summary.config.memorySizeMB
+  - guest.guestFamily
+  - guest.hostName
+  - guest.ipAddress
+  - guest.toolsStatus
+  - cluster
+  - datacenter
+
+filter_expressions:
+  - "config.template == false"
+
+groups:
+  powered_on: summary.runtime.powerState == "poweredOn"
+  powered_off: summary.runtime.powerState == "poweredOff"
+  windows: config.guestFullName | regex_search("Windows")
+  linux: config.guestFullName | regex_search("Linux")
+
+compose:
+  ansible_host: guest.ipAddress | default(ansible_host)
+  vm_name: name
+  vm_power_state: summary.runtime.powerState
+  vm_cpu_count: summary.config.numCpu
+  vm_memory_mb: summary.config.memorySizeMB
+
+keyed_groups:
+  - key: summary.runtime.powerState
+    separator: ""
+  - key: guest.guestFamily
+    separator: ""
+
+cache: true
+cache_timeout: 3600

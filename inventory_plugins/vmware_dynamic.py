@@ -20,13 +20,33 @@ class InventoryModule(BaseInventoryPlugin):
         if value is None:
             return None
         if isinstance(value, str):
-            # Remove caracteres de controle, aspas problemáticas e outros caracteres especiais
+            # Remove caracteres de controle e caracteres problemáticos
             value = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', value)
+            
+            # Remove sequências problemáticas que podem quebrar JSON
+            problematic_patterns = [
+                r'"[^"]*"[^"]*"[^"]*"',  # Múltiplas aspas duplas
+                r"'[^']*'[^']*'[^']*'",  # Múltiplas aspas simples
+                r'\{[^}]*\}[^}]*\}',      # Múltiplas chaves
+                r'}}}}',                  # Sequência de chaves problemática
+                r'""',                    # Aspas duplas vazias
+                r"''"                     # Aspas simples vazias
+            ]
+            
+            for pattern in problematic_patterns:
+                value = re.sub(pattern, '', value)
+            
+            # Sanitização básica
             value = value.replace('"', "'").replace("'", "").replace('\n', ' ').replace('\r', ' ')
             value = value.replace('\\', '/').replace('{', '').replace('}', '')
+            
             # Remove espaços múltiplos e caracteres não ASCII problemáticos
             value = re.sub(r'\s+', ' ', value)
             value = re.sub(r'[^\x20-\x7E]', '', value)  # Apenas ASCII printável
+            
+            # Remove caracteres que podem quebrar parsing JSON/YAML
+            value = value.replace(':', '').replace(',', '').replace('[', '').replace(']', '')
+            
             return value.strip()
         return value
 
@@ -35,14 +55,28 @@ class InventoryModule(BaseInventoryPlugin):
         problematic_vars = [
             'remote_host_enabled', 'remote_host_id', 
             'remote_tower_enabled', 'remote_tower_id',
-            'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id'
+            'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id',
+            'ansible_host_key_checking', 'ansible_ssh_common_args',
+            'ansible_ssh_extra_args', 'ansible_connection_timeout'
         ]
         
-        for host_name in self.inventory.hosts:
+        for host_name in list(self.inventory.hosts.keys()):
             host = self.inventory.hosts[host_name]
-            for var in problematic_vars:
-                if var in host.vars:
-                    del host.vars[var]
+            # Criar cópia das variáveis para iteração segura
+            vars_to_remove = []
+            for var_name, var_value in host.vars.items():
+                # Remover variáveis problemáticas conhecidas
+                if var_name in problematic_vars:
+                    vars_to_remove.append(var_name)
+                # Remover variáveis com valores que contêm caracteres problemáticos
+                elif isinstance(var_value, str):
+                    if any(char in var_value for char in ['"}}}}', '"}', "'}", "{{", "}}"]):
+                        print(f"Removendo variável problemática {var_name} do host {host_name}")
+                        vars_to_remove.append(var_name)
+            
+            # Remover variáveis identificadas
+            for var_name in vars_to_remove:
+                del host.vars[var_name]
 
     def _validate_inventory_json(self):
         """Valida se o inventário pode ser serializado como JSON válido"""
@@ -80,6 +114,27 @@ class InventoryModule(BaseInventoryPlugin):
         
         for host_name in hosts_to_remove:
             self.inventory.remove_host(host_name)
+    
+    def _final_cleanup(self):
+        """Limpeza final para garantir que não há variáveis problemáticas"""
+        for host_name in list(self.inventory.hosts.keys()):
+            host = self.inventory.hosts[host_name]
+            vars_to_remove = []
+            
+            for var_name, var_value in host.vars.items():
+                # Verificar se a variável contém a sequência problemática do erro
+                if isinstance(var_value, str):
+                    if any(problem in var_value for problem in ['564dba5b-c886-5576-5ce2-8e7f4889d270', 
+                                                               '"remote_host_enabled"',
+                                                               '"remote_tower_enabled"',
+                                                               '}}}}',
+                                                               'No closing quotation']):
+                        vars_to_remove.append(var_name)
+                        print(f"Removendo variável final problemática {var_name} do host {host_name}")
+            
+            # Remover variáveis identificadas
+            for var_name in vars_to_remove:
+                del host.vars[var_name]
 
     def parse(self, inventory, loader, path, cache=True):
         self.inventory = inventory
@@ -218,3 +273,6 @@ class InventoryModule(BaseInventoryPlugin):
         
         # Validação final de integridade JSON
         self._validate_inventory_json()
+        
+        # Limpeza final - remover qualquer host que ainda tenha problemas
+        self._final_cleanup()

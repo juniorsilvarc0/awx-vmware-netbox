@@ -25,18 +25,28 @@ Este repositório implementa um **inventário dinâmico somente leitura** de VMs
 ## 🏗️ Arquitetura do Projeto
 
 ```
-vmware-inventory-awx/
-├── inventories/vmware/     # Inventário dinâmico VMware
-├── playbooks/             # Playbooks de relatórios
-├── roles/                 # Roles de coleta de facts
-├── scripts/              # Scripts auxiliares Python
-└── group_vars/           # Variáveis classificativas
+awx-vmware-netbox/
+├── 📄 inventory.yml           # Inventário dinâmico principal (raiz)
+├── 📁 group_vars/             # Variáveis classificativas
+│   ├── all.yml               # Variáveis globais
+│   ├── windows.yml           # Classificação Windows
+│   └── linux.yml             # Classificação Linux
+├── 📁 playbooks/             # Playbooks de relatórios
+│   ├── test_inventory.yml    # Teste do inventário
+│   └── vm_facts_collection.yml # Coleta de facts
+├── 📁 roles/                 # Roles de análise
+│   └── vmware_facts/         # Role principal de facts
+├── 📁 scripts/              # Scripts auxiliares Python
+│   ├── vmware_inventory.py  # Script de inventário standalone
+│   └── vmware_monitor.py    # Script de monitoramento
+├── 📄 ansible.cfg           # Configuração Ansible
+└── 📄 requirements.txt      # Dependências Python
 ```
 
 ### 🔧 Tecnologias Utilizadas
 
 - **Ansible**: Automação e inventário dinâmico
-- **VMware vSphere API**: Coleta de dados via pyvmomi
+- **VMware vSphere API**: Coleta de dados via vmware.vmware.vms plugin
 - **AWX/Tower**: Orquestração e interface web
 - **Python**: Scripts auxiliares e monitoramento
 - **YAML**: Configuração e estrutura de dados
@@ -86,7 +96,7 @@ ESTRUTURA PADRÃO:
 **Contexto para modificações no inventário:**
 
 ```
-Arquivo: inventories/vmware/vmware.yml
+Arquivo: inventory.yml (na raiz do projeto)
 
 PERMITIDO:
 - Adicionar novos grupos baseados em propriedades
@@ -107,6 +117,12 @@ EXEMPLOS:
 VARIÁVEIS COMPOSE:
 compose:
   vm_campo_personalizado: fonte.propriedade | filtro
+
+CONFIGURAÇÃO ATUAL:
+- Plugin: vmware.vmware.vms
+- validate_certs: false
+- Cache: habilitado (3600s)
+- Filtros: apenas VMs não template
 ```
 
 ### 📊 Criação de Relatórios
@@ -128,6 +144,14 @@ EXEMPLO DE FORMATAÇÃO:
 ║ 📊 Métrica 1: {{ valor }}              ║
 ║ 📈 Métrica 2: {{ valor }}              ║
 ╚════════════════════════════════════════╝
+
+DADOS DISPONÍVEIS NO INVENTÁRIO:
+- vm_name: Nome da VM
+- vm_power_state: Estado de energia
+- vm_cpu_count: Número de CPUs
+- vm_memory_mb: Memória em MB
+- ansible_host: IP da VM
+- Grupos automáticos: powered_on, powered_off, windows, linux
 ```
 
 ### 🏷️ Sistema de Variáveis
@@ -147,47 +171,52 @@ CATEGORIAS DE VARIÁVEIS:
 - Metadados: inventory_metadata, audit_info
 - Tags: computed_tags, classification_tags
 
+ARQUIVOS EXISTENTES:
+- group_vars/all.yml: Variáveis globais
+- group_vars/windows.yml: Específico para Windows
+- group_vars/linux.yml: Específico para Linux
+
 FORMATO PADRÃO:
 variavel_categoria:
   subcategoria:
     item: "valor"
 ```
 
-## 🚀 Comandos Úteis do Claude Code
+## 🚀 Comandos de Desenvolvimento
 
 ### 📋 Comandos Específicos do Projeto
 
 ```bash
-# Gerar novo playbook de relatório
-claude create playbook --type report --name "nome_relatorio" --target "grupo_vms"
+# Validar inventário YAML
+ansible-inventory -i inventory.yml --list
 
-# Adicionar novo grupo ao inventário
-claude add inventory-group --name "nome_grupo" --condition "propriedade | operador | valor"
+# Testar playbook de relatório
+ansible-playbook -i inventory.yml playbooks/test_inventory.yml
 
-# Criar role de análise
-claude create role --name "analise_personalizada" --focus "readonly-facts"
+# Executar coleta de facts
+ansible-playbook -i inventory.yml playbooks/vm_facts_collection.yml
 
-# Gerar script Python de monitoramento
-claude create script --type monitoring --output "scripts/monitor_custom.py"
+# Verificar grupos dinâmicos
+ansible-inventory -i inventory.yml --graph
 
-# Validar configuração YAML
-claude validate --file "inventories/vmware/vmware.yml"
+# Validar sintaxe YAML
+ansible-playbook --syntax-check playbooks/[playbook].yml
 ```
 
-### 🔧 Prompts Contextuais
+### 🔧 Prompts Contextuais para Claude Code
 
 ```bash
 # Para desenvolvimento de playbooks
-claude --context="vmware-inventory-readonly" create playbook
+"Criar playbook de relatório VMware somente leitura"
 
-# Para análise de performance
-claude --context="vm-performance-analysis" enhance playbook
-
-# Para relatórios executivos
-claude --context="executive-reporting" format output
+# Para análise de inventário
+"Analisar e otimizar grupos do inventário VMware"
 
 # Para troubleshooting
-claude --context="awx-vmware-debug" analyze logs
+"Debug do inventário dinâmico VMware no AWX"
+
+# Para melhorias
+"Melhorar classificação de VMs no group_vars"
 ```
 
 ## 📖 Prompts de Engenharia Avançada
@@ -202,23 +231,23 @@ CONTEXTO:
 - Plataforma: AWX/Ansible Tower
 - Restrição: NUNCA modificar VMs, apenas coletar dados
 
-REQUISITOS:
-1. gather_facts: false (obrigatório)
-2. ansible_connection: local (obrigatório)
+REQUISITOS OBRIGATÓRIOS:
+1. gather_facts: false
+2. ansible_connection: local
 3. Usar apenas dados do inventário dinâmico
 4. Foco em: [especificar: relatório/análise/exportação]
 5. Target: [especificar grupo de VMs]
+
+DADOS DISPONÍVEIS:
+- vm_name, vm_power_state, vm_cpu_count, vm_memory_mb
+- ansible_host, grupos automáticos (powered_on, windows, linux)
+- Propriedades VMware via hostvars
 
 FORMATO DE SAÍDA:
 - Debug messages com formatação ASCII
 - Emojis para categorização visual
 - Estatísticas quantitativas
 - Exportação JSON opcional
-
-EXEMPLO DE USO:
-- hosts: [grupo_alvo]
-- Análise de: [métricas específicas]
-- Saída: [formato desejado]
 
 VALIDAÇÕES:
 ✅ Sem conexão direta às VMs
@@ -233,9 +262,15 @@ VALIDAÇÕES:
 Analise e melhore o inventário VMware seguindo estas diretrizes:
 
 ESCOPO DE ANÁLISE:
-- Arquivo: inventories/vmware/vmware.yml
+- Arquivo: inventory.yml (raiz do projeto)
+- Plugin atual: vmware.vmware.vms
 - Foco: Otimização de grupos e classificação
-- Objetivo: Melhor organização para relatórios
+
+CONFIGURAÇÃO ATUAL:
+- Propriedades coletadas: name, config.uuid, runtime.powerState, etc.
+- Grupos existentes: powered_on, powered_off, windows, linux
+- Compose variables: vm_name, vm_power_state, vm_cpu_count, vm_memory_mb
+- Cache: habilitado (3600s)
 
 ÁREAS DE MELHORIA:
 1. Grupos dinâmicos mais específicos
@@ -248,12 +283,6 @@ CRITÉRIOS DE QUALIDADE:
 - Nomenclatura consistente
 - Performance otimizada
 - Facilidade de manutenção
-
-SAÍDA ESPERADA:
-- Inventário otimizado
-- Documentação das mudanças
-- Justificativa técnica
-- Impacto nos relatórios
 
 RESTRIÇÕES:
 ❌ Não adicionar credenciais
@@ -269,6 +298,12 @@ Desenvolva um sistema de relatórios avançado para inventário VMware:
 
 OBJETIVO:
 Criar relatórios executivos detalhados para gestão de infraestrutura
+
+DADOS DISPONÍVEIS:
+- Inventário: vm_name, vm_power_state, vm_cpu_count, vm_memory_mb
+- Grupos: powered_on, powered_off, windows, linux
+- Hostvars: todas as propriedades VMware coletadas
+- Group_vars: variáveis classificativas em all.yml, windows.yml, linux.yml
 
 COMPONENTES NECESSÁRIOS:
 1. Resumo executivo visual
@@ -288,13 +323,6 @@ CRITÉRIOS DE QUALIDADE:
 ⚡ Performance otimizada
 📈 Insights acionáveis
 🔍 Detalhamento configurável
-
-ESTRUTURA DO RELATÓRIO:
-1. Header com informações gerais
-2. Estatísticas por categoria
-3. Análise de conformidade
-4. Alertas e recomendações
-5. Dados para exportação
 
 VALIDAÇÃO:
 ✅ Funciona com inventário atual
@@ -344,7 +372,7 @@ export CLAUDE_EMOJI_MODE="enabled"
 # Template para group_vars
 ---
 # {{ group_name }} specific variables - READ ONLY
-# File: inventories/vmware/group_vars/{{ group_name }}.yml
+# File: group_vars/{{ group_name }}.yml
 
 # Classification variables
 {{ group_name }}_classification:
@@ -356,44 +384,57 @@ export CLAUDE_EMOJI_MODE="enabled"
   last_updated: "{{ ansible_date_time.date }}"
 ```
 
-## 🎯 Exemplos de Uso Prático
+## 🎯 Estrutura de Arquivos Atual
 
-### 💼 Cenário 1: Novo Relatório de Compliance
+### 📄 Inventário Principal (inventory.yml)
 
-```bash
-claude create compliance-report \
-  --scope "production VMs" \
-  --criteria "vmware-tools,resources,naming" \
-  --output "playbooks/compliance_report.yml" \
-  --format "executive-summary"
+```yaml
+# Configuração do plugin VMware
+plugin: vmware.vmware.vms
+validate_certs: false
+gather_tags: true
+
+# Propriedades coletadas
+properties:
+  - name, config.uuid, config.guestFullName
+  - runtime.powerState, summary.config.numCpu
+  - summary.config.memorySizeMB, guest.*
+  - cluster, datacenter
+
+# Filtros e grupos automáticos
+filter_expressions:
+  - "config.template == false"
+
+groups:
+  powered_on: summary.runtime.powerState == "poweredOn"
+  powered_off: summary.runtime.powerState == "poweredOff"
+  windows: config.guestFullName | regex_search("Windows")
+  linux: config.guestFullName | regex_search("Linux")
 ```
 
-### 📊 Cenário 2: Análise de Recursos
+### 📁 Playbooks Disponíveis
 
-```bash
-claude analyze resource-utilization \
-  --focus "cpu,memory,storage" \
-  --grouping "environment,criticality" \
-  --threshold "high-usage" \
-  --recommendations "optimization"
-```
+1. **test_inventory.yml**: Teste e relatório básico do inventário
+2. **vm_facts_collection.yml**: Coleta detalhada de facts das VMs
 
-### 🔍 Cenário 3: Debug de Inventário
+### 📁 Group_vars Existentes
 
-```bash
-claude debug inventory-sync \
-  --check "group-creation,variable-assignment" \
-  --validate "yaml-syntax,awx-compatibility" \
-  --report "troubleshooting-guide"
-```
+1. **all.yml**: Variáveis globais para todas as VMs
+2. **windows.yml**: Variáveis específicas para VMs Windows
+3. **linux.yml**: Variáveis específicas para VMs Linux
+
+### 📁 Scripts Python
+
+1. **vmware_inventory.py**: Script standalone para teste do inventário
+2. **vmware_monitor.py**: Script de monitoramento e métricas
 
 ## 📚 Recursos de Referência
 
 ### 🔗 Links Importantes
 
 - [Ansible VMware Guide](https://docs.ansible.com/ansible/latest/collections/community/vmware/)
+- [VMware vSphere Plugin](https://docs.ansible.com/ansible/latest/collections/vmware/vmware/vms_inventory.html)
 - [AWX Inventory Sources](https://docs.ansible.com/ansible-tower/latest/html/userguide/inventories.html)
-- [PyVmomi Documentation](https://github.com/vmware/pyvmomi)
 
 ### 📖 Padrões de Código
 
@@ -406,12 +447,35 @@ claude debug inventory-sync \
 
 1. **Sempre valide YAML** antes de commit
 2. **Teste playbooks** em ambiente isolado
-3. **Documente mudanças** no CHANGELOG
-4. **Use versionamento semântico** para releases
-5. **Mantenha backward compatibility** sempre que possível
+3. **Use ansible-inventory --list** para validar inventário
+4. **Mantenha cache otimizado** para performance
+5. **Documente mudanças** nos comentários YAML
+
+## 🛠️ Troubleshooting Comum
+
+### ❌ Problemas Frequentes
+
+1. **Credenciais VMware**: Configurar no AWX, não nos arquivos
+2. **Timeout de inventário**: Ajustar cache_timeout no inventory.yml
+3. **Grupos não criados**: Verificar expressões em groups
+4. **Performance lenta**: Otimizar propriedades coletadas
+
+### ✅ Comandos de Validação
+
+```bash
+# Testar inventário localmente
+ansible-inventory -i inventory.yml --list
+
+# Verificar sintaxe do playbook
+ansible-playbook --syntax-check playbooks/test_inventory.yml
+
+# Debug do inventário
+ansible-inventory -i inventory.yml --graph --vars
+```
 
 ---
 
 **Configurado para:** ATI Piauí - Inventário VMware AWX  
-**Última atualização:** {{ ansible_date_time.iso8601 }}  
-**Modo de operação:** Somente Leitura 🔒
+**Última atualização:** 2025-07-12  
+**Modo de operação:** Somente Leitura 🔒  
+**Arquitetura:** AWX + VMware vSphere API + Ansible 🏗️

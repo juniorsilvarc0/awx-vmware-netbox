@@ -2,23 +2,20 @@
 # Playbook para sincronizar VMs do inventário VMware para o NetBox
 # Arquivo: playbooks/vmware_to_netbox.yml
 
-- name: 🌐 Sincronizar VMs VMware para NetBox
+- name: Sincronizar VMs VMware para NetBox
   hosts: all
   gather_facts: false
   vars:
     ansible_connection: local
-    # Configurações do NetBox (fornecidas via Custom Credential "Netbox Credentials")
     netbox_url: "{{ lookup('env', 'NETBOX_API') }}"
     netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
-
-    # Configurações de sincronização
     batch_size: 50
     create_missing_objects: true
     update_existing: true
     dry_run: false
 
   tasks:
-    - name: 🧹 Limpar variáveis problemáticas do AWX de forma explícita
+    - name: Limpar variáveis problemáticas do AWX
       set_fact:
         remote_host_enabled: ""
         remote_host_id: ""
@@ -30,28 +27,28 @@
         awx_id: ""
       failed_when: false
 
-    - name: 🔒 Debug - verificar limpeza de variáveis
+    - name: Debug - verificar limpeza de variáveis
       debug:
         msg: |
-          🧹 Variáveis limpas:
+          Variáveis limpas:
           - remote_host_enabled: {{ remote_host_enabled | default('undefined') }}
           - remote_host_id: {{ remote_host_id | default('undefined') }}
           - remote_tower_enabled: {{ remote_tower_enabled | default('undefined') }}
           - remote_tower_id: {{ remote_tower_id | default('undefined') }}
       when: dry_run
 
-    - name: ⏭️ Pular VMs sem dados essenciais
+    - name: Pular VMs sem dados essenciais
       meta: end_host
       when: vm_name is undefined or vm_name == ""
 
-    - name: 📋 Preparar dados da VM do inventário AWX
+    - name: Preparar dados da VM
       set_fact:
         vm_meta:
           name: "{{ vm_name }}"
           uuid: "{{ vm_uuid }}"
           vcpus: "{{ vm_cpu_count | default(1) }}"
           memory: "{{ vm_memory_mb | default(1024) }}"
-          disk: "{{ 20 }}"  # Default 20GB
+          disk: "{{ 20 }}"
           cluster: "{{ vm_cluster | default('default-cluster') }}"
           datacenter: "{{ vm_datacenter | default('ATI-SLC-HCI') }}"
           status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' if vm_power_state == 'poweredOff' else 'staged' }}"
@@ -73,49 +70,7 @@
             {% endif %}
             {{ interfaces }}
 
-    - name: 📊 Debug dados da VM preparados
-      debug:
-        msg: |
-          🖥️ VM: {{ vm_meta.name }}
-          🔌 Estado: {{ vm_meta.status }}
-          🧠 CPUs: {{ vm_meta.vcpus }}
-          💾 Memória: {{ vm_meta.memory }}MB
-          🌐 IPs: {{ vm_meta.interfaces | map(attribute='ipaddresses') | flatten | join(', ') }}
-          🏢 Datacenter: {{ vm_meta.datacenter }}
-          🔧 Cluster: {{ vm_meta.cluster }}
-
-    - name: 📊 Exibir estatísticas iniciais
-      debug:
-        msg: |
-          🌐 SINCRONIZAÇÃO VMWARE → NETBOX
-          ================================
-          🎯 Total de VMs para processar: {{ ansible_play_hosts | length }}
-          ✅ VMs Ligadas (poweredOn → Active): {{ groups['powered_on'] | default([]) | length }}
-          ❌ VMs Desligadas (poweredOff → Offline): {{ groups['powered_off'] | default([]) | length }}
-          ⏸️  VMs Suspensas (suspended → Staged): {{ groups['suspended'] | default([]) | length }}
-          🔗 NetBox URL: {{ netbox_url }}
-          🔄 Modo: {{ 'DRY RUN' if dry_run else 'PRODUÇÃO' }}
-          📦 Tamanho do lote: {{ batch_size }}
-      run_once: true
-      delegate_to: localhost
-
-    - name: 🔄 Exibir mapeamento de status VMware → NetBox
-      debug:
-        msg: |
-          📋 MAPEAMENTO DE STATUS:
-          ======================
-          ✅ poweredOn (VMware) → active (NetBox)
-          ❌ poweredOff (VMware) → offline (NetBox)  
-          ⏸️  suspended (VMware) → staged (NetBox)
-          
-          📊 DISTRIBUIÇÃO ATUAL:
-          • VMs que ficarão Active: {{ groups['powered_on'] | default([]) | length }}
-          • VMs que ficarão Offline: {{ groups['powered_off'] | default([]) | length }}
-          • VMs que ficarão Staged: {{ groups['suspended'] | default([]) | length }}
-      run_once: true
-      delegate_to: localhost
-
-    - name: 🏗️ Criar site no NetBox (se necessário)
+    - name: Criar site no NetBox se necessário
       netbox.netbox.netbox_site:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
@@ -128,7 +83,7 @@
       delegate_to: localhost
       when: not dry_run
 
-    - name: 🏭 Criar tipo de cluster VMware
+    - name: Criar tipo de cluster VMware
       netbox.netbox.netbox_cluster_type:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
@@ -141,7 +96,7 @@
       run_once: true
       when: not dry_run
 
-    - name: 🔍 Verificar se cluster existe
+    - name: Verificar se cluster existe
       uri:
         url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ vm_meta.cluster | urlencode }}"
         headers:
@@ -153,7 +108,7 @@
       delegate_to: localhost
       when: not dry_run
 
-    - name: 🏗️ Criar cluster se não existir
+    - name: Criar cluster se não existir
       netbox.netbox.netbox_cluster:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
@@ -164,11 +119,11 @@
           description: "Cluster criado automaticamente via AWX"
         state: present
       delegate_to: localhost
-      when: 
+      when:
         - not dry_run
         - cluster_check.json.count | int == 0
 
-    - name: 🖥️ Criar/atualizar VM no NetBox
+    - name: Criar/atualizar VM no NetBox
       netbox.netbox.netbox_virtual_machine:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
@@ -192,11 +147,11 @@
       delegate_to: localhost
       when: not dry_run
 
-    - name: 🔍 Verificar se a VM possui interfaces
+    - name: Verificar se a VM possui interfaces
       set_fact:
         vm_interfaces_raw: "{{ vm_meta.interfaces | default([]) }}"
 
-    - name: 🌐 Filtrar interfaces com IPs
+    - name: Filtrar interfaces com IPs
       set_fact:
         interfaces_com_ip: >-
           {{ vm_interfaces_raw
@@ -205,7 +160,7 @@
              | selectattr('ipaddresses', '!=', [])
              | list }}
 
-    - name: 🌐 Criar/atualizar interfaces (com MAC)
+    - name: Criar/atualizar interfaces com MAC
       netbox.netbox.netbox_vm_interface:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
@@ -221,11 +176,11 @@
         loop_var: iface
         label: "{{ iface.name }}"
       delegate_to: localhost
-      when: 
+      when:
         - not dry_run
         - interfaces_com_ip | length > 0
 
-    - name: 🔢 Criar IPs no IPAM
+    - name: Criar IPs no IPAM
       netbox.netbox.netbox_ip_address:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
@@ -238,11 +193,11 @@
       loop_control:
         label: "{{ item.1 }}"
       delegate_to: localhost
-      when: 
+      when:
         - not dry_run
         - interfaces_com_ip | length > 0
 
-    - name: 🔍 Obter interfaces da VM no NetBox
+    - name: Obter interfaces da VM no NetBox
       uri:
         url: "{{ netbox_url }}/api/virtualization/interfaces/?virtual_machine={{ vm_meta.name }}"
         headers:
@@ -252,11 +207,11 @@
         validate_certs: false
       register: vm_interfaces
       delegate_to: localhost
-      when: 
+      when:
         - not dry_run
         - interfaces_com_ip | length > 0
 
-    - name: 🔍 Obter IDs de IPs existentes
+    - name: Obter IDs de IPs existentes
       uri:
         url: "{{ netbox_url }}/api/ipam/ip-addresses/?address={{ item.1 }}{{ '/128' if ':' in item.1 else '/32' }}"
         headers:
@@ -272,16 +227,15 @@
       delay: 2
       until: ip_query.status == 200
       delegate_to: localhost
-      when: 
+      when:
         - not dry_run
         - interfaces_com_ip | length > 0
 
-    - name: 🔗 Montar mapeamento IP ↔ interface (com validação)
+    - name: Montar mapeamento IP ↔ interface
       set_fact:
         ip_interface_map: "{{ ip_interface_map | default([]) + [ new_map ] }}"
       vars:
         iface_name: "{{ item.0.0.name }}"
-        # Validação segura do acesso ao JSON
         ip_id: >-
           {{ (item.1.json.results[0].id if (item.1 is defined and 
                                            item.1.json is defined and 
@@ -301,13 +255,13 @@
       loop: "{{ query('subelements', interfaces_com_ip, 'ipaddresses') | zip(ip_query.results) | list }}"
       loop_control:
         label: "{{ item.0.1 }}"
-      when: 
+      when:
         - not dry_run
         - interfaces_com_ip | length > 0
         - ip_id is defined and ip_id != omit
         - iface_id is defined and iface_id != omit
 
-    - name: 🔗 Associar IPs às interfaces
+    - name: Associar IPs às interfaces
       uri:
         url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.ip_id }}/"
         method: PATCH
@@ -323,31 +277,11 @@
       loop_control:
         label: "IP {{ item.ip_id }} → Interface {{ item.iface_id }}"
       delegate_to: localhost
-      when: 
+      when:
         - not dry_run
         - ip_interface_map is defined
 
-    - name: 📝 Log do resultado da sincronização
-      debug:
-        msg: |
-          {% if dry_run %}
-          🔍 DRY RUN - VM {{ vm_meta.name }}:
-          ├─ Nome: {{ vm_meta.name }}
-          ├─ IPs: {{ vm_meta.interfaces | map(attribute='ipaddresses') | flatten | join(', ') if vm_meta.interfaces else 'N/A' }}
-          ├─ SO: {{ vm_guest_os | default('Unknown') }}
-          ├─ Estado: {{ vm_meta.status }}
-          ├─ CPU: {{ vm_meta.vcpus }} cores
-          ├─ Memória: {{ vm_meta.memory }}MB
-          ├─ Cluster: {{ vm_meta.cluster }}
-          └─ Datacenter: {{ vm_meta.datacenter }}
-          {% else %}
-          ✅ VM {{ vm_meta.name }} processada com sucesso no NetBox
-          ├─ Estado: {{ vm_meta.status }}
-          ├─ Interfaces: {{ interfaces_com_ip | length }} criadas
-          └─ IPs: {{ vm_meta.interfaces | map(attribute='ipaddresses') | flatten | length }} associados
-          {% endif %}
-
-- name: 📊 Relatório Final de Sincronização
+- name: Relatório Final de Sincronização
   hosts: localhost
   gather_facts: false
   vars:
@@ -355,24 +289,21 @@
   run_once: true
 
   tasks:
-    - name: 📋 Gerar estatísticas finais
+    - name: Gerar estatísticas finais
       debug:
         msg: |
 
-          ╔════════════════════════════════════════════════╗
-          ║           RELATÓRIO DE SINCRONIZAÇÃO           ║
-          ║              VMWARE → NETBOX                   ║
-          ╠════════════════════════════════════════════════╣
-          ║ 🎯 Total de VMs processadas: {{ ansible_play_hosts | length }}               ║
-          ║ 🌐 NetBox URL: {{ netbox_url }}
-          ║ 🔄 Modo: {{ 'DRY RUN (simulação)' if dry_run else 'PRODUÇÃO (real)' }}                    ║
-          ║ ⏰ Executado em: {{ ansible_date_time.iso8601 }}     ║
-          ╚════════════════════════════════════════════════╝
+          RELATÓRIO DE SINCRONIZAÇÃO
+          ---------------------------
+          Total de VMs processadas: {{ ansible_play_hosts | length }}
+          NetBox URL: {{ netbox_url }}
+          Modo: {{ 'DRY RUN (simulação)' if dry_run else 'PRODUÇÃO (real)' }}
+          Executado em: {{ ansible_date_time.iso8601 }}
 
-          💡 Para executar em modo de produção:
+          Para executar em modo de produção:
              Desmarque a variável 'dry_run' ou defina como false
 
-          🔧 Para customizar:
-             • batch_size: Tamanho do lote de processamento
-             • update_existing: Atualizar VMs existentes
-             • create_missing_objects: Criar objetos faltantes
+          Para customizar:
+             - batch_size: Tamanho do lote de processamento
+             - update_existing: Atualizar VMs existentes
+             - create_missing_objects: Criar objetos faltantes

@@ -1,0 +1,515 @@
+---
+# Playbook para gerar relatórios do inventário VMware - SOMENTE LEITURA
+# Arquivo: playbooks/inventory_report.yml
+
+- name: 🔍 Relatório do Inventário VMware - Visão Geral
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Exibir informações da VM
+      debug:
+        msg: |
+          =====================================
+          📋 INVENTÁRIO VMWARE - {{ vm_name | default('N/A') }}
+          =====================================
+          🆔 UUID: {{ vm_uuid | default('N/A') }}
+          ⚡ Estado: {{ vm_power_state | default('N/A') }}
+          💻 SO: {{ vm_guest_os | default('N/A') }}
+          🏢 Datacenter: {{ vm_datacenter | default('N/A') }}
+          🏗️  Cluster: {{ vm_cluster | default('N/A') }}
+          📁 Pasta: {{ vm_folder | default('N/A') }}
+          🔧 CPU: {{ vm_cpu_count | default('N/A') }} cores ({{ vm_cpu_category | default('N/A') }})
+          💾 Memória: {{ vm_memory_gb | default('N/A') }} GB ({{ vm_memory_category | default('N/A') }})
+          🌐 IP: {{ vm_ip_addresses | default('N/A') }}
+          🖥️  Hostname: {{ vm_hostname | default('N/A') }}
+          🛠️  VMware Tools: {{ vm_tools_status | default('N/A') }}
+          📂 Datastores: {{ vm_datastores | default('N/A') }}
+          🔗 Redes: {{ vm_networks | default('N/A') }}
+          📸 Snapshots: {{ vm_snapshot_count | default(0) }}
+          📝 Anotação: {{ vm_annotation | default('N/A') }}
+          🏷️  Ambiente: {{ vm_environment | default('N/A') }}
+          📈 Criticidade: {{ vm_criticality | default('N/A') }}
+          =====================================
+
+- name: 📈 Estatísticas - VMs por Estado de Energia
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Resumo por estado de energia
+      debug:
+        msg: |
+          ⚡ ESTATÍSTICAS POR ESTADO DE ENERGIA
+          ✅ VMs Ligadas: {{ groups['powered_on'] | default([]) | length }}
+          ❌ VMs Desligadas: {{ groups['powered_off'] | default([]) | length }}
+          ⏸️  VMs Suspensas: {{ groups['suspended'] | default([]) | length }}
+
+- name: 🖥️ Estatísticas - VMs por Sistema Operacional
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Resumo por SO
+      debug:
+        msg: |
+          🖥️  ESTATÍSTICAS POR SISTEMA OPERACIONAL
+          🪟 VMs Windows: {{ groups['windows'] | default([]) | length }}
+          │  ├─ Windows Server: {{ groups['windows_server'] | default([]) | length }}
+          │  └─ Windows Desktop: {{ groups['windows_desktop'] | default([]) | length }}
+          🐧 VMs Linux: {{ groups['linux'] | default([]) | length }}
+          │  ├─ Ubuntu: {{ groups['ubuntu'] | default([]) | length }}
+          │  ├─ CentOS: {{ groups['centos'] | default([]) | length }}
+          │  ├─ Red Hat: {{ groups['redhat'] | default([]) | length }}
+          │  └─ SUSE: {{ groups['suse'] | default([]) | length }}
+
+- name: ⚡ Estatísticas - VMs por Recursos
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Resumo por recursos
+      debug:
+        msg: |
+          ⚡ ESTATÍSTICAS POR RECURSOS
+          🔧 CPU:
+          │  ├─ Alto (8+ cores): {{ groups['high_cpu'] | default([]) | length }}
+          │  ├─ Médio (4-7 cores): {{ groups['medium_cpu'] | default([]) | length }}
+          │  └─ Baixo (<4 cores): {{ groups['low_cpu'] | default([]) | length }}
+          💾 Memória:
+          │  ├─ Alta (16+ GB): {{ groups['high_memory'] | default([]) | length }}
+          │  ├─ Média (8-15 GB): {{ groups['medium_memory'] | default([]) | length }}
+          │  ├─ Baixa (4-7 GB): {{ groups['low_memory'] | default([]) | length }}
+          │  └─ Mínima (<4 GB): {{ groups['minimal_memory'] | default([]) | length }}
+          🚀 Alto Desempenho: {{ groups['high_performance'] | default([]) | length }}
+
+- name: 🛠️ Estatísticas - VMware Tools
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Status VMware Tools
+      debug:
+        msg: |
+          🛠️  ESTATÍSTICAS VMWARE TOOLS
+          ✅ Tools OK: {{ groups['tools_ok'] | default([]) | length }}
+          ⚠️  Tools Desatualizadas: {{ groups['tools_outdated'] | default([]) | length }}
+          ❌ Tools Não Instaladas: {{ groups['tools_not_installed'] | default([]) | length }}
+          🔴 Tools Não Executando: {{ groups['tools_not_running'] | default([]) | length }}
+
+- name: 📸 Estatísticas - Snapshots
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Status de snapshots
+      debug:
+        msg: |
+          📸 ESTATÍSTICAS DE SNAPSHOTS
+          ✅ VMs com Snapshots: {{ groups['has_snapshots'] | default([]) | length }}
+          📚 VMs com Múltiplos Snapshots: {{ groups['multiple_snapshots'] | default([]) | length }}
+          🔴 VMs sem Snapshots: {{ groups['no_snapshots'] | default([]) | length }}
+
+- name: 🌍 Estatísticas - Ambientes
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 VMs por ambiente
+      debug:
+        msg: |
+          🌍 ESTATÍSTICAS POR AMBIENTE
+          🏭 Produção: {{ groups['production'] | default([]) | length }}
+          🧪 Desenvolvimento: {{ groups['development'] | default([]) | length }}
+          🔬 Teste: {{ groups['testing'] | default([]) | length }}
+          🎭 Staging: {{ groups['staging'] | default([]) | length }}
+
+- name: ⚠️ VMs que Precisam de Atenção
+  hosts: needs_attention
+  gather_facts: false
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 🚨 Listar VMs problemáticas
+      debug:
+        msg: |
+          ⚠️  VM PRECISA DE ATENÇÃO: {{ vm_name }}
+          Motivos:
+          {% if vm_tools_status != 'toolsOk' %}  • VMware Tools: {{ vm_tools_status }}{% endif %}
+          {% if vm_power_state == 'poweredOff' %}  • Estado: VM Desligada{% endif %}
+          {% if vm_snapshot_count > 5 %}  • Muitos Snapshots: {{ vm_snapshot_count }}{% endif %}
+      when: vm_tools_status != 'toolsOk' or vm_power_state == 'poweredOff' or vm_snapshot_count > 5
+
+- name: 📋 Relatório Executivo Final
+  hosts: localhost
+  gather_facts: true
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Gerar resumo executivo completo
+      debug:
+        msg: |
+
+          ╔══════════════════════════════════════════════╗
+          ║           RESUMO EXECUTIVO VMWARE            ║
+          ║              INVENTÁRIO COMPLETO             ║
+          ╠══════════════════════════════════════════════╣
+          ║ 📊 TOTAIS GERAIS                             ║
+          ║   • Total de VMs: {{ groups['all'] | length }}                           ║
+          ║   • VMs Ativas: {{ groups['powered_on'] | default([]) | length }}                            ║
+          ║   • VMs Inativas: {{ groups['powered_off'] | default([]) | length }}                         ║
+          ║   • VMs Suspensas: {{ groups['suspended'] | default([]) | length }}                          ║
+          ║                                              ║
+          ║ 🖥️  SISTEMAS OPERACIONAIS                    ║
+          ║   • Windows: {{ groups['windows'] | default([]) | length }}                               ║
+          ║   • Linux: {{ groups['linux'] | default([]) | length }}                                 ║
+          ║                                              ║
+          ║ ⚡ RECURSOS                                   ║
+          ║   • Alto CPU (8+): {{ groups['high_cpu'] | default([]) | length }}                       ║
+          ║   • Alta Memória (16GB+): {{ groups['high_memory'] | default([]) | length }}              ║
+          ║   • Alto Desempenho: {{ groups['high_performance'] | default([]) | length }}              ║
+          ║                                              ║
+          ║ 🛠️  VMWARE TOOLS                             ║
+          ║   • OK: {{ groups['tools_ok'] | default([]) | length }}                                   ║
+          ║   • Desatualizadas: {{ groups['tools_outdated'] | default([]) | length }}                 ║
+          ║   • Não Instaladas: {{ groups['tools_not_installed'] | default([]) | length }}            ║
+          ║                                              ║
+          ║ 🌍 AMBIENTES                                 ║
+          ║   • Produção: {{ groups['production'] | default([]) | length }}                           ║
+          ║   • Desenvolvimento: {{ groups['development'] | default([]) | length }}                   ║
+          ║   • Teste: {{ groups['testing'] | default([]) | length }}                                ║
+          ║                                              ║
+          ║ ⚠️  ATENÇÃO NECESSÁRIA                       ║
+          ║   • VMs Problemáticas: {{ groups['needs_attention'] | default([]) | length }}             ║
+          ║   • VMs com Snapshots: {{ groups['has_snapshots'] | default([]) | length }}               ║
+          ║                                              ║
+          ║ 📅 INFORMAÇÕES DO RELATÓRIO                  ║
+          ║   • Data/Hora: {{ ansible_date_time.iso8601 | default('N/A') }}        ║
+          ║   • Modo: Somente Leitura                   ║
+          ║   • Fonte: Inventário Dinâmico AWX          ║
+          ╚══════════════════════════════════════════════╝
+
+- name: 💾 Exportar Dados do Inventário (JSON)
+  hosts: localhost
+  gather_facts: true
+  run_once: true
+  vars:
+    ansible_connection: local
+    export_file: "/tmp/vmware_inventory_{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}.json"
+
+  tasks:
+    - name: 📄 Criar arquivo de exportação
+      copy:
+        content: |
+          {
+            "inventory_metadata": {
+              "report_timestamp": "{{ ansible_date_time.iso8601 }}",
+              "report_type": "vmware_inventory_summary",
+              "mode": "read_only",
+              "total_vms": {{ groups['all'] | length }}
+            },
+            "summary_statistics": {
+              "power_state": {
+                "powered_on": {{ groups['powered_on'] | default([]) | length }},
+                "powered_off": {{ groups['powered_off'] | default([]) | length }},
+                "suspended": {{ groups['suspended'] | default([]) | length }}
+              },
+              "operating_systems": {
+                "windows_total": {{ groups['windows'] | default([]) | length }},
+                "windows_server": {{ groups['windows_server'] | default([]) | length }},
+                "windows_desktop": {{ groups['windows_desktop'] | default([]) | length }},
+                "linux_total": {{ groups['linux'] | default([]) | length }},
+                "ubuntu": {{ groups['ubuntu'] | default([]) | length }},
+                "centos": {{ groups['centos'] | default([]) | length }},
+                "redhat": {{ groups['redhat'] | default([]) | length }}
+              },
+              "resources": {
+                "high_cpu": {{ groups['high_cpu'] | default([]) | length }},
+                "high_memory": {{ groups['high_memory'] | default([]) | length }},
+                "high_performance": {{ groups['high_performance'] | default([]) | length }}
+              },
+              "vmware_tools": {
+                "tools_ok": {{ groups['tools_ok'] | default([]) | length }},
+                "tools_outdated": {{ groups['tools_outdated'] | default([]) | length }},
+                "tools_not_installed": {{ groups['tools_not_installed'] | default([]) | length }}
+              },
+              "environments": {
+                "production": {{ groups['production'] | default([]) | length }},
+                "development": {{ groups['development'] | default([]) | length }},
+                "testing": {{ groups['testing'] | default([]) | length }},
+                "staging": {{ groups['staging'] | default([]) | length }}
+              },
+              "attention_required": {
+                "needs_attention": {{ groups['needs_attention'] | default([]) | length }},
+                "has_snapshots": {{ groups['has_snapshots'] | default([]) | length }},
+                "multiple_snapshots": {{ groups['multiple_snapshots'] | default([]) | length }}
+              }
+            },
+            "inventory_groups": {{ groups | to_nice_json }}
+          }
+        dest: "{{ export_file }}"
+        mode: "0644"
+      delegate_to: localhost
+
+    - name: ✅ Confirmação de exportação
+      debug:
+        msg: |
+          📄 EXPORTAÇÃO CONCLUÍDA
+          ========================
+          📁 Arquivo: {{ export_file }}
+          📊 Dados: Inventário completo VMware
+          🕐 Timestamp: {{ ansible_date_time.iso8601 }}
+          🔒 Modo: Somente Leitura
+
+          💡 Este arquivo contém um resumo completo do inventário
+          e pode ser usado para análises ou relatórios externos.---
+# Playbook de teste para verificar inventário VMware
+# Arquivo: playbooks/test_inventory.yml
+
+- name: 🔍 Teste do Inventário VMware - Relatório Geral
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    report_timestamp: "{{ ansible_date_time.iso8601 }}"
+
+  tasks:
+    - name: 📊 Gerar relatório de inventário
+      debug:
+        msg: |
+          =====================================
+          RELATÓRIO DE INVENTÁRIO VMWARE
+          =====================================
+          🕐 Timestamp: {{ report_timestamp }}
+          📋 VM: {{ vm_name | default('N/A') }}
+          🆔 UUID: {{ vm_uuid | default('N/A') }}
+          ⚡ Estado: {{ vm_power_state | default('N/A') }}
+          💻 SO: {{ vm_guest_os | default('N/A') }}
+          🏢 Datacenter: {{ vm_datacenter | default('N/A') }}
+          🏗️  Cluster: {{ vm_cluster | default('N/A') }}
+          📁 Pasta: {{ vm_folder | default('N/A') }}
+          🔧 CPU: {{ vm_cpu_count | default('N/A') }} cores
+          💾 Memória: {{ vm_memory_gb | default('N/A') }} GB
+          🌐 IP: {{ vm_ip_addresses | default('N/A') }}
+          🖥️  Hostname: {{ vm_hostname | default('N/A') }}
+          🛠️  VMware Tools: {{ vm_tools_status | default('N/A') }}
+          📂 Datastores: {{ vm_datastores | default('N/A') }}
+          🔗 Redes: {{ vm_networks | default('N/A') }}
+          📝 Anotação: {{ vm_annotation | default('N/A') }}
+          =====================================
+
+- name: 📈 Estatísticas por Grupo - VMs Ligadas
+  hosts: powered_on
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Contar VMs ligadas
+      debug:
+        msg: "✅ Total de VMs ligadas: {{ groups['powered_on'] | length }}"
+
+- name: 📉 Estatísticas por Grupo - VMs Desligadas
+  hosts: powered_off
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Contar VMs desligadas
+      debug:
+        msg: "❌ Total de VMs desligadas: {{ groups['powered_off'] | length }}"
+
+- name: 🪟 Relatório de VMs Windows
+  hosts: windows
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Estatísticas Windows
+      debug:
+        msg: |
+          🪟 RELATÓRIO WINDOWS
+          Total de VMs Windows: {{ groups['windows'] | length }}
+          VMs Windows ligadas: {{ groups['windows'] | intersect(groups['powered_on'] | default([])) | length }}
+          VMs Windows desligadas: {{ groups['windows'] | intersect(groups['powered_off'] | default([])) | length }}
+
+- name: 🐧 Relatório de VMs Linux
+  hosts: linux
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Estatísticas Linux
+      debug:
+        msg: |
+          🐧 RELATÓRIO LINUX
+          Total de VMs Linux: {{ groups['linux'] | length }}
+          VMs Linux ligadas: {{ groups['linux'] | intersect(groups['powered_on'] | default([])) | length }}
+          VMs Linux desligadas: {{ groups['linux'] | intersect(groups['powered_off'] | default([])) | length }}
+
+- name: ⚡ Relatório de Alto Desempenho
+  hosts: high_performance
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 VMs de alto desempenho
+      debug:
+        msg: |
+          ⚡ RELATÓRIO ALTO DESEMPENHO
+          VMs com alto desempenho: {{ groups['high_performance'] | default([]) | length }}
+          Critério: >= 8 CPUs e >= 16GB RAM
+
+- name: 🛠️ Relatório VMware Tools
+  hosts: all
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Status VMware Tools
+      debug:
+        msg: |
+          🛠️  RELATÓRIO VMWARE TOOLS
+          Tools OK: {{ groups['tools_ok'] | default([]) | length }}
+          Tools Desatualizadas: {{ groups['tools_outdated'] | default([]) | length }}
+          Tools Não Instaladas: {{ groups['tools_not_installed'] | default([]) | length }}
+
+- name: 📸 Relatório de Snapshots
+  hosts: has_snapshots
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 VMs com snapshots
+      debug:
+        msg: |
+          📸 RELATÓRIO SNAPSHOTS
+          VMs com snapshots: {{ groups['has_snapshots'] | default([]) | length }}
+          VMs com múltiplos snapshots: {{ groups['multiple_snapshots'] | default([]) | length }}
+      when: groups['has_snapshots'] is defined
+
+- name: 🎯 Relatório de VMs que Precisam de Atenção
+  hosts: needs_attention
+  gather_facts: false
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: ⚠️ Listar VMs problemáticas
+      debug:
+        msg: |
+          ⚠️  VM PRECISA DE ATENÇÃO
+          Nome: {{ vm_name }}
+          Motivo: {% if vm_tools_status != 'toolsOk' %}VMware Tools: {{ vm_tools_status }}{% endif %}{% if vm_power_state == 'poweredOff' %} | VM Desligada{% endif %}
+      when: vm_tools_status != 'toolsOk' or vm_power_state == 'poweredOff'
+
+- name: 📋 Relatório Final - Resumo Executivo
+  hosts: localhost
+  gather_facts: false
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📊 Resumo executivo
+      debug:
+        msg: |
+
+          ╔════════════════════════════════════════╗
+          ║        RESUMO EXECUTIVO VMWARE         ║
+          ╠════════════════════════════════════════╣
+          ║ 📊 Total de VMs: {{ groups['all'] | length }}
+          ║ ✅ VMs Ligadas: {{ groups['powered_on'] | default([]) | length }}
+          ║ ❌ VMs Desligadas: {{ groups['powered_off'] | default([]) | length }}
+          ║ ⏸️  VMs Suspensas: {{ groups['suspended'] | default([]) | length }}
+          ║ 🪟 VMs Windows: {{ groups['windows'] | default([]) | length }}
+          ║ 🐧 VMs Linux: {{ groups['linux'] | default([]) | length }}
+          ║ 🚀 CPU Alto: {{ groups['high_cpu'] | default([]) | length }}
+          ║ 💾 Memória Alta: {{ groups['high_memory'] | default([]) | length }}
+          ║ ⚡ Alto Desempenho: {{ groups['high_performance'] | default([]) | length }}
+          ║ 🛠️  Tools OK: {{ groups['tools_ok'] | default([]) | length }}
+          ║ ⚠️  Precisam Atenção: {{ groups['needs_attention'] | default([]) | length }}
+          ║ 📸 Com Snapshots: {{ groups['has_snapshots'] | default([]) | length }}
+          ║ 🏭 Produção: {{ groups['production'] | default([]) | length }}
+          ║ 🧪 Desenvolvimento: {{ groups['development'] | default([]) | length }}
+          ╚════════════════════════════════════════╝
+
+          📅 Relatório gerado em: {{ ansible_date_time.iso8601 | default('N/A') }}
+          🏢 Datacenter: {{ datacenter_name }}
+          🔗 vCenter: {{ vcenter_hostname }}
+
+- name: 💾 Salvar relatório em arquivo (opcional)
+  hosts: localhost
+  gather_facts: true
+  run_once: true
+  vars:
+    ansible_connection: local
+    report_file: "/tmp/vmware_inventory_report_{{ ansible_date_time.date }}.json"
+
+  tasks:
+    - name: 📄 Criar relatório JSON
+      copy:
+        content: |
+          {
+            "report_timestamp": "{{ ansible_date_time.iso8601 }}",
+            "datacenter": "{{ datacenter_name }}",
+            "vcenter": "{{ vcenter_hostname }}",
+            "summary": {
+              "total_vms": {{ groups['all'] | length }},
+              "powered_on": {{ groups['powered_on'] | default([]) | length }},
+              "powered_off": {{ groups['powered_off'] | default([]) | length }},
+              "suspended": {{ groups['suspended'] | default([]) | length }},
+              "windows": {{ groups['windows'] | default([]) | length }},
+              "linux": {{ groups['linux'] | default([]) | length }},
+              "high_cpu": {{ groups['high_cpu'] | default([]) | length }},
+              "high_memory": {{ groups['high_memory'] | default([]) | length }},
+              "tools_ok": {{ groups['tools_ok'] | default([]) | length }},
+              "needs_attention": {{ groups['needs_attention'] | default([]) | length }},
+              "has_snapshots": {{ groups['has_snapshots'] | default([]) | length }}
+            },
+            "groups": {{ groups | to_nice_json }}
+          }
+        dest: "{{ report_file }}"
+        mode: "0644"
+      delegate_to: localhost
+      run_once: true
+
+    - name: ✅ Relatório salvo
+      debug:
+        msg: "📄 Relatório detalhado salvo em: {{ report_file }}"

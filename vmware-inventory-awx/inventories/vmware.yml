@@ -1,0 +1,191 @@
+---
+# Inventário dinâmico VMware para AWX - SOMENTE LEITURA
+# Arquivo: inventories/vmware/vmware.yml
+
+plugin: vmware_vm_inventory
+strict: False
+
+# Credenciais são gerenciadas pelo AWX
+# hostname, username, password vêm das credenciais configuradas no AWX
+validate_certs: false
+with_tags: true
+with_nested_properties: true
+
+# Propriedades a serem coletadas (somente leitura)
+properties:
+  - name
+  - config.uuid
+  - config.guestFullName
+  - config.annotation
+  - config.template
+  - runtime.powerState
+  - summary.config.numCpu
+  - summary.config.memorySizeMB
+  - summary.storage.committed
+  - summary.storage.uncommitted
+  - guest.guestFamily
+  - guest.hostName
+  - guest.ipAddress
+  - guest.toolsStatus
+  - guest.toolsVersion
+  - datastore
+  - network
+  - resourcePool
+  - folder
+  - cluster
+  - datacenter
+  - snapshot
+
+# Filtros para excluir templates
+filters:
+  - config.template == false
+
+# Agrupamentos dinâmicos baseados em propriedades
+keyed_groups:
+  # Agrupar por família do SO
+  - key: guest.guestFamily
+    prefix: os
+    separator: "_"
+  # Agrupar por estado de energia
+  - key: runtime.powerState
+    prefix: power
+    separator: "_"
+  # Agrupar por sistema operacional completo
+  - key: config.guestFullName | regex_replace(' ', '_') | lower
+    prefix: guest
+    separator: "_"
+  # Agrupar por cluster
+  - key: cluster
+    prefix: cluster
+    separator: "_"
+  # Agrupar por datacenter
+  - key: datacenter
+    prefix: dc
+    separator: "_"
+  # Agrupar por pasta
+  - key: folder
+    prefix: folder
+    separator: "_"
+  # Agrupar por CPU
+  - key: summary.config.numCpu
+    prefix: cpu
+    separator: "_"
+  # Agrupar por faixa de memória
+  - key: summary.config.memorySizeMB // 1024
+    prefix: memory_gb
+    separator: "_"
+
+# Variáveis customizadas para cada host (somente informativas)
+compose:
+  # Informações básicas
+  ansible_host: guest.ipAddress | default(ansible_host)
+  vm_name: name
+  vm_uuid: config.uuid
+  vm_power_state: runtime.powerState
+  vm_guest_os: config.guestFullName
+  vm_guest_family: guest.guestFamily
+  vm_annotation: config.annotation
+
+  # Recursos
+  vm_cpu_count: summary.config.numCpu
+  vm_memory_mb: summary.config.memorySizeMB
+  vm_memory_gb: (summary.config.memorySizeMB / 1024) | round(1)
+  vm_storage_committed_gb: (summary.storage.committed / 1024 / 1024 / 1024) | round(1)
+  vm_storage_uncommitted_gb: (summary.storage.uncommitted / 1024 / 1024 / 1024) | round(1)
+
+  # Localização
+  vm_datacenter: datacenter
+  vm_cluster: cluster
+  vm_folder: folder
+  vm_resource_pool: resourcePool
+
+  # Rede e conectividade
+  vm_networks: network
+  vm_datastores: datastore
+  vm_ip_addresses: guest.ipAddress
+  vm_hostname: guest.hostName
+
+  # VMware Tools
+  vm_tools_status: guest.toolsStatus
+  vm_tools_version: guest.toolsVersion
+  vm_tools_running: guest.toolsStatus == "toolsOk"
+
+  # Snapshots
+  vm_has_snapshots: snapshot | length > 0
+  vm_snapshot_count: snapshot | length
+
+  # Categorização de recursos
+  vm_cpu_category: >-
+    {%- if summary.config.numCpu >= 8 -%}high
+    {%- elif summary.config.numCpu >= 4 -%}medium
+    {%- else -%}low{%- endif -%}
+  vm_memory_category: >-
+    {%- if summary.config.memorySizeMB >= 16384 -%}high
+    {%- elif summary.config.memorySizeMB >= 8192 -%}medium
+    {%- elif summary.config.memorySizeMB >= 4096 -%}low
+    {%- else -%}minimal{%- endif -%}
+
+# Grupos lógicos baseados em condições (apenas para classificação)
+groups:
+  # Estados de energia
+  powered_on: runtime.powerState == "poweredOn"
+  powered_off: runtime.powerState == "poweredOff"
+  suspended: runtime.powerState == "suspended"
+
+  # Sistemas operacionais
+  windows: config.guestFullName | regex_search("Windows")
+  linux: config.guestFullName | regex_search("Linux|Ubuntu|CentOS|Red Hat|SUSE|Debian")
+  windows_server: config.guestFullName | regex_search("Windows Server")
+  windows_desktop: config.guestFullName | regex_search("Windows") and not config.guestFullName | regex_search("Server")
+
+  # Distribuições Linux específicas
+  ubuntu: config.guestFullName | regex_search("Ubuntu")
+  centos: config.guestFullName | regex_search("CentOS")
+  redhat: config.guestFullName | regex_search("Red Hat")
+  suse: config.guestFullName | regex_search("SUSE")
+  debian: config.guestFullName | regex_search("Debian")
+
+  # Categorias de recursos
+  high_cpu: summary.config.numCpu >= 8
+  medium_cpu: summary.config.numCpu >= 4 and summary.config.numCpu < 8
+  low_cpu: summary.config.numCpu < 4
+
+  high_memory: summary.config.memorySizeMB >= 16384
+  medium_memory: summary.config.memorySizeMB >= 8192 and summary.config.memorySizeMB < 16384
+  low_memory: summary.config.memorySizeMB >= 4096 and summary.config.memorySizeMB < 8192
+  minimal_memory: summary.config.memorySizeMB < 4096
+
+  # Combinações para relatórios
+  production_ready: runtime.powerState == "poweredOn" and guest.toolsStatus == "toolsOk"
+  needs_attention: guest.toolsStatus != "toolsOk" or runtime.powerState == "poweredOff"
+  high_performance: summary.config.numCpu >= 8 and summary.config.memorySizeMB >= 16384
+
+  # VMware Tools
+  tools_ok: guest.toolsStatus == "toolsOk"
+  tools_outdated: guest.toolsStatus == "toolsOld"
+  tools_not_installed: guest.toolsStatus == "toolsNotInstalled"
+  tools_not_running: guest.toolsStatus == "toolsNotRunning"
+
+  # Snapshots
+  has_snapshots: snapshot | length > 0
+  no_snapshots: snapshot | length == 0
+  multiple_snapshots: snapshot | length > 1
+
+  # Ambientes (baseado em anotações ou nomes)
+  production: config.annotation | regex_search("prod|production") or name | regex_search("prod|prd")
+  development: config.annotation | regex_search("dev|development") or name | regex_search("dev|devel")
+  testing: config.annotation | regex_search("test|qa") or name | regex_search("test|qa|tst")
+  staging: config.annotation | regex_search("stag|staging") or name | regex_search("stag|staging")
+
+# Configurações de hostname
+hostnames:
+  - name
+  - guest.hostName
+  - guest.ipAddress
+  - config.uuid
+
+# Cache para melhor performance
+cache: true
+cache_plugin: memory
+cache_timeout: 3600
+cache_connection: /tmp/vmware_inventory_cache

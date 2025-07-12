@@ -1,0 +1,35 @@
+# Dependências Python para inventário VMware
+# Arquivo: requirements.txt
+
+# VMware vSphere SDK
+pyvmomi>=8.0.0
+pyVim>=1.0.0
+
+# Ansible e dependências
+ansible>=6.0.0
+ansible-core>=2.13.0
+
+# Inventário dinâmico VMware
+community.vmware>=3.0.0
+
+# Utilitários
+requests>=2.28.0
+urllib3>=1.26.0
+certifi>=2022.0.0
+
+# Parsing e manipulação de dados
+PyYAML>=6.0
+jinja2>=3.1.0
+
+# Logging e debug
+colorlog>=6.7.0
+
+# Criptografia para credenciais
+cryptography>=38.0.0
+
+# Validação de dados
+jsonschema>=4.17.0
+
+# Cache e performance
+redis>=4.3.0  # Opcional para cache Redis
+memcached>=1.5.0  # Opcional para cache Memcached

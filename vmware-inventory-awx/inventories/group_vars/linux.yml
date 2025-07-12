@@ -1,0 +1,415 @@
+---
+# Variáveis específicas para VMs Linux
+# Arquivo: inventories/vmware/group_vars/linux.yml
+
+# Configurações de conexão SSH
+ansible_connection: ssh
+ansible_port: 22
+ansible_become: true
+ansible_become_method: sudo
+
+# Credenciais (substituir por credenciais do AWX)
+ansible_user: "{{ vault_linux_user | default('ansible') }}"
+ansible_ssh_private_key_file: "{{ vault_ssh_private_key | default('~/.ssh/id_rsa') }}"
+ansible_ssh_pass: "{{ vault_linux_password | default(omit) }}"
+ansible_become_pass: "{{ vault_sudo_password | default(omit) }}"
+
+# Configurações SSH específicas
+ansible_ssh_common_args: >-
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o ControlMaster=auto
+  -o ControlPersist=60s
+  -o ServerAliveInterval=60
+  -o ServerAliveCountMax=3
+
+# Identificação do SO
+os_family: "Linux"
+os_type: "linux"
+
+# Configurações de classificação Linux
+linux_classification:
+  # Distribuições mais comuns
+  distributions:
+    redhat_family:
+      - "Red Hat Enterprise Linux"
+      - "CentOS"
+      - "Rocky Linux"
+      - "AlmaLinux"
+      - "Fedora"
+    
+    debian_family:
+      - "Ubuntu"
+      - "Debian"
+      - "Linux Mint"
+    
+    suse_family:
+      - "SUSE Linux Enterprise"
+      - "openSUSE"
+    
+    other:
+      - "Oracle Linux"
+      - "Amazon Linux"
+  
+  # Gerenciadores de pacotes
+  package_managers:
+    apt: ["Ubuntu", "Debian"]
+    yum: ["CentOS", "Red Hat", "Oracle Linux"]
+    dnf: ["Fedora", "Rocky Linux", "AlmaLinux"]
+    zypper: ["SUSE", "openSUSE"]
+
+# Portas padrão Linux para documentação
+linux_standard_ports:
+  ssh: 22
+  http: 80
+  https: 443
+  ftp: 21
+  telnet: 23
+  smtp: 25
+  dns: 53
+  dhcp: 67
+  ntp: 123
+  snmp: 161
+  mysql: 3306
+  postgresql: 5432
+
+# Serviços críticos Linux para monitoramento
+linux_critical_services:
+  - "sshd"
+  - "cron"
+  - "rsyslog"
+  - "systemd"
+  - "NetworkManager"
+  - "chronyd"
+  - "firewalld"
+
+# Configurações típicas de recursos Linux
+linux_resource_profiles:
+  web_server:
+    min_cpu: 1
+    recommended_cpu: 2
+    min_memory_gb: 1
+    recommended_memory_gb: 4
+    min_disk_gb: 20
+  
+  database_server:
+    min_cpu: 2
+    recommended_cpu: 4
+    min_memory_gb: 4
+    recommended_memory_gb: 8
+    min_disk_gb: 50
+  
+  application_server:
+    min_cpu: 2
+    recommended_cpu: 4
+    min_memory_gb: 2
+    recommended_memory_gb: 8
+    min_disk_gb: 30
+  
+  container_host:
+    min_cpu: 2
+    recommended_cpu: 4
+    min_memory_gb: 4
+    recommended_memory_gb: 16
+    min_disk_gb: 50
+
+# Softwares comuns Linux para análise
+linux_common_software:
+  base_packages:
+    - "curl"
+    - "wget"
+    - "vim"
+    - "htop"
+    - "git"
+    - "unzip"
+    - "rsync"
+    - "lsof"
+  
+  monitoring_packages:
+    - "iostat"
+    - "iotop"
+    - "nload"
+    - "dstat"
+    - "sysstat"
+  
+  development_packages:
+    - "python3"
+    - "python3-pip"
+    - "gcc"
+    - "make"
+    - "nodejs"
+    - "docker"
+
+# Categorização para relatórios
+linux_categorization:
+  # Baseado na distribuição
+  distribution_family: >-
+    {%- if 'Ubuntu' in (vm_guest_os | default('')) or 'Debian' in (vm_guest_os | default('')) -%}
+    debian
+    {%- elif 'Red Hat' in (vm_guest_os | default('')) or 'CentOS' in (vm_guest_os | default('')) or 'Rocky' in (vm_guest_os | default('')) -%}
+    redhat
+    {%- elif 'SUSE' in (vm_guest_os | default('')) -%}
+    suse
+    {%- else -%}
+    other
+    {%- endif -%}
+  
+  # Versão da distribuição
+  distribution_version: >-
+    {%- if 'Ubuntu 20.04' in (vm_guest_os | default('')) -%}
+    ubuntu_20_04
+    {%- elif 'Ubuntu 22.04' in (vm_guest_os | default('')) -%}
+    ubuntu_22_04
+    {%- elif 'CentOS 7' in (vm_guest_os | default('')) -%}
+    centos_7
+    {%- elif 'CentOS 8' in (vm_guest_os | default('')) -%}
+    centos_8
+    {%- elif 'Red Hat 8' in (vm_guest_os | default('')) -%}
+    rhel_8
+    {%- elif 'Red Hat 9' in (vm_guest_os | default('')) -%}
+    rhel_9
+    {%- else -%}
+    unknown
+    {%- endif -%}
+
+# Métricas específicas Linux
+linux_metrics:
+  # Limites recomendados para Linux
+  performance_thresholds:
+    cpu_high_usage: 80
+    memory_high_usage: 85
+    disk_low_space: 10
+    load_average_warning: 2.0
+  
+  # Uptime esperado
+  expected_uptime:
+    production: "99.9%"
+    development: "95%"
+    testing: "90%"
+
+# Tags específicas Linux
+linux_specific_tags:
+  - "os_linux"
+  - "open_source"
+  - "supports_ssh"
+  - "scriptable"
+  - "container_ready"
+
+# Classificação por uso típico
+linux_typical_usage:
+  server_roles:
+    - "Web Server"
+    - "Database Server"
+    - "Application Server"
+    - "File Server"
+    - "DNS Server"
+    - "Mail Server"
+    - "Proxy Server"
+    - "Load Balancer"
+    - "Container Host"
+    - "Development Server"
+
+# Configurações específicas do Linux
+linux_config:
+  # Gerenciamento de pacotes
+  package_management:
+    auto_update: false
+    auto_remove: true
+    cache_update: true
+    upgrade_all: false
+  
+  # Serviços essenciais
+  essential_services:
+    - "sshd"
+    - "cron"
+    - "rsyslog"
+    - "NetworkManager"
+  
+  # Configurações de firewall
+  firewall:
+    enabled: true
+    default_policy: "DROP"
+    allowed_ports:
+      - 22    # SSH
+      - 80    # HTTP (se necessário)
+      - 443   # HTTPS (se necessário)
+    allowed_services:
+      - ssh
+  
+  # Configurações de kernel
+  kernel:
+    sysctl_settings:
+      - name: "net.ipv4.ip_forward"
+        value: "0"
+      - name: "net.ipv4.conf.all.accept_redirects"
+        value: "0"
+      - name: "net.ipv4.conf.all.secure_redirects"
+        value: "0"
+      - name: "net.ipv4.conf.all.send_redirects"
+        value: "0"
+      - name: "vm.swappiness"
+        value: "10"
+  
+  # Configurações de segurança
+  security:
+    disable_root_login: true
+    password_authentication: false
+    permit_empty_passwords: false
+    max_auth_tries: 3
+    client_alive_interval: 300
+    client_alive_count_max: 2
+
+# Software padrão Linux
+linux_software:
+  base_packages:
+    - curl
+    - wget
+    - vim
+    - htop
+    - git
+    - unzip
+    - rsync
+    - lsof
+    - netstat-nat
+    - tcpdump
+  
+  monitoring_packages:
+    - iostat
+    - iotop
+    - nload
+    - dstat
+  
+  development_packages:
+    - python3
+    - python3-pip
+    - build-essential
+
+# Configurações específicas por distribuição
+distribution_config:
+  Ubuntu:
+    package_manager: "apt"
+    service_manager: "systemd"
+    additional_packages:
+      - ubuntu-server
+      - software-properties-common
+      - apt-transport-https
+  
+  CentOS:
+    package_manager: "yum"
+    service_manager: "systemd"
+    additional_packages:
+      - epel-release
+      - yum-utils
+  
+  "Red Hat":
+    package_manager: "yum"
+    service_manager: "systemd"
+    additional_packages:
+      - redhat-lsb-core
+
+# Configurações de monitoramento Linux
+linux_monitoring:
+  log_files:
+    - "/var/log/messages"
+    - "/var/log/syslog"
+    - "/var/log/auth.log"
+    - "/var/log/secure"
+  
+  system_metrics:
+    - cpu_usage
+    - memory_usage
+    - disk_usage
+    - network_traffic
+    - load_average
+  
+  services_to_monitor:
+    - "sshd"
+    - "cron"
+    - "rsyslog"
+
+# Tarefas de manutenção Linux
+linux_maintenance:
+  log_rotation: true
+  package_cleanup: true
+  tmp_cleanup: true
+  
+  cron_jobs:
+    - name: "System update check"
+      job: "/usr/bin/apt list --upgradable"
+      minute: "0"
+      hour: "6"
+      weekday: "1"
+    
+    - name: "Disk usage report"
+      job: "df -h > /tmp/disk_usage_$(date +\\%Y\\%m\\%d).log"
+      minute: "0"
+      hour: "8"
+
+# Backup específico Linux
+linux_backup:
+  system_config: true
+  user_data: false
+  log_files: false
+  
+  paths_to_backup:
+    - "/etc"
+    - "/home"
+    - "/var/spool/cron"
+    - "/usr/local"
+  
+  excluded_paths:
+    - "/tmp"
+    - "/var/tmp"
+    - "/var/cache"
+    - "/var/log"
+    - "/proc"
+    - "/sys"
+    - "/dev"
+
+# Configurações de patch específicas Linux
+linux_patching:
+  reboot_required_packages:
+    - "kernel"
+    - "glibc"
+    - "systemd"
+    - "openssh"
+  
+  pre_patch_commands:
+    - "systemctl stop unnecessary-service || true"
+  
+  post_patch_commands:
+    - "systemctl start necessary-service"
+    - "systemctl daemon-reload"
+
+# Configurações de performance Linux
+linux_performance:
+  tune_kernel: true
+  optimize_services: true
+  
+  kernel_parameters:
+    vm.dirty_ratio: 15
+    vm.dirty_background_ratio: 5
+    vm.vfs_cache_pressure: 50
+    net.core.rmem_max: 16777216
+    net.core.wmem_max: 16777216
+
+# Limites específicos para Linux
+linux_limits:
+  cpu:
+    min_cores: 1
+    recommended_cores: 2
+  memory:
+    min_mb: 512
+    recommended_mb: 2048
+  disk:
+    root_partition_min_gb: 10
+    recommended_free_space_percent: 10
+
+# Configurações de usuários e grupos
+linux_users:
+  system_users:
+    - name: "ansible"
+      groups: ["sudo", "wheel"]
+      shell: "/bin/bash"
+      create_home: true
+      system: false

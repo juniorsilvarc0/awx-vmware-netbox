@@ -1,0 +1,85 @@
+---
+# Variáveis globais para inventário VMware - SOMENTE LEITURA
+# Arquivo: inventories/vmware/group_vars/all.yml
+
+# Configurações do inventário (credenciais gerenciadas pelo AWX)
+inventory_mode: "read_only"
+collect_detailed_facts: false
+
+# Configurações padrão do Ansible para coleta de informações
+ansible_connection_timeout: 30
+ansible_command_timeout: 60
+
+# Variáveis para classificação e relatórios
+vm_environment: "{{ 'production' if 'prod' in (vm_name | lower) else 'development' if 'dev' in (vm_name | lower) else 'testing' if 'test' in (vm_name | lower) else 'unknown' }}"
+vm_criticality: "{{ 'high' if vm_environment == 'production' else 'medium' if vm_environment == 'testing' else 'low' }}"
+
+# Tags padrão para classificação das VMs
+vm_classification_tags:
+  - "datacenter_ati_slc_hci"
+  - "env_{{ vm_environment }}"
+  - "criticality_{{ vm_criticality }}"
+  - "managed_by_awx"
+  - "read_only_inventory"
+
+# Configurações para relatórios
+reporting:
+  enabled: true
+  include_performance_metrics: true
+  include_storage_details: true
+  include_network_details: true
+
+# Configurações de monitoramento (apenas coleta de dados)
+monitoring_classification:
+  high_cpu_threshold: 8
+  high_memory_threshold_gb: 16
+  low_disk_space_threshold_percent: 15
+
+# Categorização de recursos para relatórios
+resource_categories:
+  cpu:
+    minimal: "1-2 cores"
+    low: "3-4 cores"
+    medium: "5-8 cores"
+    high: "9+ cores"
+  memory:
+    minimal: "< 4GB"
+    low: "4-8GB"
+    medium: "8-16GB"
+    high: "> 16GB"
+  storage:
+    small: "< 50GB"
+    medium: "50-200GB"
+    large: "200-500GB"
+    xlarge: "> 500GB"
+
+# Metadados para relatórios
+inventory_metadata:
+  purpose: "VMware VM Inventory Collection"
+  mode: "Read-Only"
+  data_source: "vCenter Server"
+  refresh_frequency: "1 hour"
+
+# Configurações de cache para performance
+cache_settings:
+  enable_cache: true
+  cache_timeout: 3600
+  cache_location: "/tmp/vmware_inventory_cache"
+
+# Limites de recursos para classificação
+resource_classification:
+  cpu:
+    low_end: 2
+    mid_range: 4
+    high_end: 8
+    enterprise: 16
+  memory_mb:
+    low_end: 2048
+    mid_range: 8192
+    high_end: 16384
+    enterprise: 32768
+  storage_gb:
+    small: 40
+    medium: 100
+    large: 500
+    enterprise: 1000

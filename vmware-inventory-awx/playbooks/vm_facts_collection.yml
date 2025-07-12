@@ -1,0 +1,182 @@
+---
+# Playbook para coleta detalhada de facts das VMs - SOMENTE LEITURA
+# Arquivo: playbooks/vm_facts_collection.yml
+
+- name: 🔍 Coleta Detalhada de Facts VMware
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📋 Aplicar role de coleta de facts
+      include_role:
+        name: vmware_facts
+      when: vm_name is defined
+
+- name: 📊 Análise de Performance das VMs
+  hosts: powered_on
+  gather_facts: false
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: ⚡ Calcular métricas de performance
+      set_fact:
+        vm_performance_score: >-
+          {%- set cpu_score = (vm_cpu_count | default(1) | int) * 25 -%}
+          {%- set memory_score = (vm_memory_gb | default(1) | float) * 10 -%}
+          {%- set tools_score = 50 if vm_tools_status == 'toolsOk' else 0 -%}
+          {{ (cpu_score + memory_score + tools_score) | int }}
+
+        vm_performance_category: >-
+          {%- set score = vm_performance_score | default(0) | int -%}
+          {%- if score >= 300 -%}enterprise
+          {%- elif score >= 200 -%}high
+          {%- elif score >= 100 -%}medium
+          {%- else -%}basic{%- endif -%}
+
+    - name: 📈 Exibir análise de performance
+      debug:
+        msg: |
+          📈 ANÁLISE DE PERFORMANCE - {{ vm_name }}
+          ==========================================
+          🎯 Score Total: {{ vm_performance_score }}/500
+          🏆 Categoria: {{ vm_performance_category | upper }}
+
+          📊 Componentes do Score:
+          ├─ CPU ({{ vm_cpu_count }} cores): {{ (vm_cpu_count | default(1) | int) * 25 }} pts
+          ├─ Memória ({{ vm_memory_gb }}GB): {{ (vm_memory_gb | default(1) | float) * 10 }} pts
+          └─ VMware Tools: {{ 50 if vm_tools_status == 'toolsOk' else 0 }} pts
+
+          💡 Recomendações:
+          {% if vm_performance_score < 100 %}├─ ⚠️  Performance básica - considerar upgrade{% endif %}
+          {% if vm_tools_status != 'toolsOk' %}├─ 🛠️  Atualizar VMware Tools{% endif %}
+          {% if vm_cpu_count < 2 %}├─ 🔧 Considerar adicionar mais CPUs{% endif %}
+          {% if vm_memory_gb < 4 %}├─ 💾 Considerar adicionar mais memória{% endif %}
+      when: vm_performance_score is defined
+
+- name: 🏷️ Classificação Automática de VMs
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 🏷️ Gerar tags automáticas
+      set_fact:
+        vm_auto_tags:
+          - "vm_{{ vm_name | lower | regex_replace('[^a-z0-9]', '_') }}"
+          - "state_{{ vm_power_state | lower }}"
+          - "cpu_{{ vm_cpu_category | default('unknown') }}"
+          - "memory_{{ vm_memory_category | default('unknown') }}"
+          - "tools_{{ vm_tools_status | lower | regex_replace('tools', '') | default('unknown') }}"
+          - "os_{{ vm_guest_family | lower | default('unknown') }}"
+          - "env_{{ vm_environment | lower }}"
+          - "criticality_{{ vm_criticality | lower }}"
+          - "datacenter_{{ vm_datacenter | lower | regex_replace('[^a-z0-9]', '_') | default('unknown') }}"
+          - "cluster_{{ vm_cluster | lower | regex_replace('[^a-z0-9]', '_') | default('unknown') }}"
+
+    - name: 📝 Exibir classificação da VM
+      debug:
+        msg: |
+          🏷️  CLASSIFICAÇÃO AUTOMÁTICA - {{ vm_name }}
+          =============================================
+          📊 Ambiente: {{ vm_environment | title }}
+          📈 Criticidade: {{ vm_criticality | title }}
+          🏗️  Localização: {{ vm_datacenter }}/{{ vm_cluster }}
+
+          🏷️  Tags Geradas:
+          {% for tag in vm_auto_tags %}
+          ├─ {{ tag }}
+          {% endfor %}
+      when: vm_auto_tags is defined
+
+- name: 🔍 Análise de Conformidade
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: ✅ Verificar conformidade básica
+      set_fact:
+        vm_compliance_checks:
+          vmware_tools_ok: "{{ vm_tools_status == 'toolsOk' }}"
+          has_minimum_resources: "{{ vm_cpu_count >= 1 and vm_memory_gb >= 1 }}"
+          is_properly_named: "{{ vm_name | length > 3 and vm_name != vm_uuid }}"
+          has_ip_address: "{{ vm_ip_addresses is defined and vm_ip_addresses | length > 0 }}"
+          in_known_datacenter: "{{ vm_datacenter is defined and vm_datacenter != '' }}"
+
+        vm_compliance_score: >-
+          {%- set checks = [
+            vm_tools_status == 'toolsOk',
+            vm_cpu_count >= 1 and vm_memory_gb >= 1,
+            vm_name | length > 3 and vm_name != vm_uuid,
+            vm_ip_addresses is defined and vm_ip_addresses | length > 0,
+            vm_datacenter is defined and vm_datacenter != ''
+          ] -%}
+          {{ (checks | select | list | length / checks | length * 100) | round(0) | int }}
+
+    - name: 📋 Relatório de conformidade
+      debug:
+        msg: |
+          📋 ANÁLISE DE CONFORMIDADE - {{ vm_name }}
+          ==========================================
+          🎯 Score de Conformidade: {{ vm_compliance_score }}%
+
+          ✅ Verificações:
+          ├─ VMware Tools OK: {{ '✅' if vm_compliance_checks.vmware_tools_ok else '❌' }}
+          ├─ Recursos Mínimos: {{ '✅' if vm_compliance_checks.has_minimum_resources else '❌' }}
+          ├─ Nome Adequado: {{ '✅' if vm_compliance_checks.is_properly_named else '❌' }}
+          ├─ Tem Endereço IP: {{ '✅' if vm_compliance_checks.has_ip_address else '❌' }}
+          └─ Datacenter Conhecido: {{ '✅' if vm_compliance_checks.in_known_datacenter else '❌' }}
+
+          {% if vm_compliance_score < 100 %}
+          ⚠️  Ações Recomendadas:
+          {% if not vm_compliance_checks.vmware_tools_ok %}├─ Instalar/atualizar VMware Tools{% endif %}
+          {% if not vm_compliance_checks.has_minimum_resources %}├─ Verificar configuração de recursos{% endif %}
+          {% if not vm_compliance_checks.is_properly_named %}├─ Revisar convenção de nomenclatura{% endif %}
+          {% if not vm_compliance_checks.has_ip_address %}├─ Verificar configuração de rede{% endif %}
+          {% endif %}
+      when: vm_compliance_checks is defined
+
+- name: 📊 Relatório Consolidado de Facts
+  hosts: localhost
+  gather_facts: true
+  run_once: true
+  vars:
+    ansible_connection: local
+
+  tasks:
+    - name: 📈 Calcular estatísticas de performance
+      set_fact:
+        performance_stats:
+          enterprise_vms: "{{ ansible_play_hosts | map('extract', hostvars, 'vm_performance_category') | select('equalto', 'enterprise') | list | length }}"
+          high_performance_vms: "{{ ansible_play_hosts | map('extract', hostvars, 'vm_performance_category') | select('equalto', 'high') | list | length }}"
+          medium_performance_vms: "{{ ansible_play_hosts | map('extract', hostvars, 'vm_performance_category') | select('equalto', 'medium') | list | length }}"
+          basic_performance_vms: "{{ ansible_play_hosts | map('extract', hostvars, 'vm_performance_category') | select('equalto', 'basic') | list | length }}"
+
+    - name: 📊 Exibir relatório consolidado
+      debug:
+        msg: |
+
+          ╔════════════════════════════════════════════════╗
+          ║         RELATÓRIO CONSOLIDADO DE FACTS         ║
+          ╠════════════════════════════════════════════════╣
+          ║ 📈 ANÁLISE DE PERFORMANCE                      ║
+          ║   • Enterprise: {{ performance_stats.enterprise_vms }} VMs                     ║
+          ║   • Alto Desempenho: {{ performance_stats.high_performance_vms }} VMs            ║
+          ║   • Médio Desempenho: {{ performance_stats.medium_performance_vms }} VMs           ║
+          ║   • Básico: {{ performance_stats.basic_performance_vms }} VMs                      ║
+          ║                                                ║
+          ║ 🏷️  CLASSIFICAÇÃO                              ║
+          ║   • Total de VMs Classificadas: {{ ansible_play_hosts | length }}              ║
+          ║   • Tags Automáticas: Geradas                 ║
+          ║   • Conformidade: Analisada                   ║
+          ║                                                ║
+          ║ 📅 INFORMAÇÕES DA COLETA                      ║
+          ║   • Data/Hora: {{ ansible_date_time.iso8601 }}      ║
+          ║   • Modo: Coleta de Facts (Somente Leitura)   ║
+          ║   • Fonte: VMware vCenter                     ║
+          ╚════════════════════════════════════════════════╝

@@ -18,24 +18,27 @@
     dry_run: false
 
   tasks:
-    - name: 🧹 Forçar limpeza de variáveis problemáticas do AWX
+    - name: 🧹 Limpar variáveis problemáticas do AWX de forma explícita
       set_fact:
-        # Remover TODAS as variáveis problemáticas do AWX
-        "{{ item }}": ""
-      loop:
-        - remote_host_enabled
-        - remote_host_id  
-        - remote_tower_enabled
-        - remote_tower_id
-        - tower_enabled
-        - tower_id
-        - awx_enabled
-        - awx_id
+        remote_host_enabled: ""
+        remote_host_id: ""
+        remote_tower_enabled: ""
+        remote_tower_id: ""
+        tower_enabled: ""
+        tower_id: ""
+        awx_enabled: ""
+        awx_id: ""
       failed_when: false
 
-    - name: 🔒 Garantir que variáveis problemáticas não existem
+    - name: 🔒 Debug - verificar limpeza de variáveis
       debug:
-        msg: "Variáveis AWX removidas: {{ ansible_facts | select('match', '^remote_|^tower_|^awx_') | list }}"
+        msg: |
+          🧹 Variáveis limpas:
+          - remote_host_enabled: {{ remote_host_enabled | default('undefined') }}
+          - remote_host_id: {{ remote_host_id | default('undefined') }}
+          - remote_tower_enabled: {{ remote_tower_enabled | default('undefined') }}
+          - remote_tower_id: {{ remote_tower_id | default('undefined') }}
+      when: dry_run
 
     - name: ⏭️ Pular VMs sem dados essenciais
       meta: end_host

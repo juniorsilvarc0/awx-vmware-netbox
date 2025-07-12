@@ -319,21 +319,38 @@ class InventoryModule(BaseInventoryPlugin):
                 
                 self.inventory.add_host(safe_name)
                 
-                # Adicionar apenas variáveis VMware válidas, NUNCA variáveis do AWX
+                # Adicionar APENAS variáveis VMware válidas - BLOQUEAR completamente variáveis AWX
                 awx_blocked_vars = [
                     'remote_host_enabled', 'remote_host_id', 'remote_tower_enabled', 'remote_tower_id',
                     'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id', 
                     'ansible_host_key_checking', 'ansible_ssh_common_args'
                 ]
                 
+                # FILTRO RIGOROSO: Apenas variáveis que começam com 'vm_' ou 'ansible_host'
+                allowed_prefixes = ['vm_', 'ansible_host']
+                
                 for k, v in vm_data.items():
-                    if v is not None and k not in awx_blocked_vars:
+                    # Bloquear qualquer variável que não seja explicitamente VMware
+                    if k in awx_blocked_vars:
+                        print(f"🚫 BLOQUEADO: {k} (variável AWX)")
+                        continue
+                    
+                    # Permitir apenas variáveis com prefixos seguros
+                    if not any(k.startswith(prefix) for prefix in allowed_prefixes):
+                        print(f"🚫 BLOQUEADO: {k} (prefixo não permitido)")
+                        continue
+                    
+                    # Bloquear se contém padrões AWX no nome
+                    if any(blocked in str(k).lower() for blocked in ['remote_', 'tower_', 'awx_']):
+                        print(f"🚫 BLOQUEADO: {k} (padrão AWX detectado)")
+                        continue
+                    
+                    if v is not None:
                         # Sanitizar valores que podem conter caracteres especiais
                         if isinstance(v, str):
                             v = self._sanitize_string(v)
-                        # Validar se não é uma variável AWX injetada
-                        if not any(blocked in str(k).lower() for blocked in ['remote_', 'tower_', 'awx_']):
-                            self.inventory.set_variable(safe_name, k, v)
+                        self.inventory.set_variable(safe_name, k, v)
+                        print(f"✅ PERMITIDO: {k}={v}")
 
                 # Criar grupos por estado de energia
                 if runtime and runtime.powerState == 'poweredOn':

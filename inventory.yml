@@ -1,6 +1,6 @@
 ---
 # Inventário dinâmico VMware para AWX - SOMENTE LEITURA
-# Arquivo: inventories/vmware/vmware.yml
+# Arquivo: inventory.yml (raiz do projeto)
 
 plugin: vmware_vm_inventory
 strict: False

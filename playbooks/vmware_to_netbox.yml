@@ -18,6 +18,18 @@
     dry_run: false
 
   tasks:
+    - name: 🧹 Limpar variáveis problemáticas do AWX
+      set_fact:
+        # Remover variáveis problemáticas
+        remote_host_enabled: null
+        remote_host_id: null
+        remote_tower_enabled: null
+        remote_tower_id: null
+        tower_enabled: null
+        tower_id: null
+        awx_enabled: null
+        awx_id: null
+
     - name: 📊 Exibir estatísticas iniciais
       debug:
         msg: |

@@ -1,0 +1,309 @@
+---
+# Playbook para sincronizar VMs do inventário VMware para o NetBox
+# Arquivo: playbooks/vmware_to_netbox.yml
+
+- name: 🌐 Sincronizar VMs VMware para NetBox
+  hosts: vmware_vms
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    # Configurações do NetBox (serão sobrescritas pelas credenciais do AWX)
+    netbox_url: "{{ netbox_api_url | default('http://177.93.133.239:8000') }}"
+    netbox_token: "{{ netbox_api_token | default('2e6be1f776b91aa3849dc3723632983e4a80443a') }}"
+
+    # Configurações de sincronização
+    batch_size: 50
+    create_missing_objects: true
+    update_existing: true
+    dry_run: false
+
+  tasks:
+    - name: 📊 Exibir estatísticas iniciais
+      debug:
+        msg: |
+          🌐 SINCRONIZAÇÃO VMWARE → NETBOX
+          ================================
+          🎯 Total de VMs para processar: {{ ansible_play_hosts | length }}
+          🔗 NetBox URL: {{ netbox_url }}
+          🔄 Modo: {{ 'DRY RUN' if dry_run else 'PRODUÇÃO' }}
+          📦 Tamanho do lote: {{ batch_size }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: 🏗️ Verificar/Criar Site no NetBox
+      uri:
+        url: "{{ netbox_url }}/api/dcim/sites/"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ vm_datacenter }}"
+      register: site_check
+      delegate_to: localhost
+      run_once: true
+      when: not dry_run
+
+    - name: 🏢 Criar Site se não existir
+      uri:
+        url: "{{ netbox_url }}/api/dcim/sites/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ vm_datacenter }}"
+          slug: "{{ vm_datacenter | lower | regex_replace('[^a-z0-9-]', '-') }}"
+          status: "active"
+          description: "Site criado automaticamente via AWX"
+        status_code: [200, 201, 400]
+      delegate_to: localhost
+      run_once: true
+      when:
+        - not dry_run
+        - site_check.json.count == 0
+
+    - name: 🖥️ Verificar/Criar Tipo de Dispositivo VM
+      uri:
+        url: "{{ netbox_url }}/api/dcim/device-types/"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          slug: "virtual-machine"
+      register: device_type_check
+      delegate_to: localhost
+      run_once: true
+      when: not dry_run
+
+    - name: 🏭 Verificar/Criar Fabricante VMware
+      uri:
+        url: "{{ netbox_url }}/api/dcim/manufacturers/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "VMware"
+          slug: "vmware"
+          description: "VMware Virtual Machines"
+        status_code: [200, 201, 400]
+      delegate_to: localhost
+      run_once: true
+      when: not dry_run
+
+    - name: 🖥️ Criar Tipo de Dispositivo VM se não existir
+      uri:
+        url: "{{ netbox_url }}/api/dcim/device-types/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          manufacturer: 1 # ID do fabricante VMware
+          model: "Virtual Machine"
+          slug: "virtual-machine"
+          u_height: 0
+          is_full_depth: false
+          description: "VMware Virtual Machine"
+        status_code: [200, 201, 400]
+      delegate_to: localhost
+      run_once: true
+      when:
+        - not dry_run
+        - device_type_check.json.count == 0
+
+    - name: 🔍 Verificar se VM já existe no NetBox
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ vm_name }}"
+      register: vm_exists
+      delegate_to: localhost
+      when: not dry_run
+
+    - name: 📋 Preparar dados da VM para NetBox
+      set_fact:
+        netbox_vm_data:
+          name: "{{ vm_name }}"
+          status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' if vm_power_state == 'poweredOff' else 'staged' }}"
+          cluster: "{{ vm_cluster | default('default-cluster') }}"
+          vcpus: "{{ vm_cpu_count | default(1) }}"
+          memory: "{{ vm_memory_mb | default(1024) }}"
+          disk: "{{ (vm_storage_committed_gb | default(20) * 1024) | int }}"
+          platform: "{{ 'windows' if vm_is_windows else 'linux' if vm_is_linux else 'other' }}"
+          description: |
+            VM importada automaticamente do vCenter
+            UUID: {{ vm_uuid }}
+            SO: {{ vm_guest_os }}
+            Cluster: {{ vm_cluster }}
+            Datacenter: {{ vm_datacenter }}
+            Ambiente: {{ vm_environment }}
+            Criticidade: {{ vm_criticality }}
+            Ferramentas VMware: {{ vm_tools_status }}
+          custom_fields:
+            vmware_uuid: "{{ vm_uuid }}"
+            vm_environment: "{{ vm_environment }}"
+            vm_criticality: "{{ vm_criticality }}"
+            vm_tools_status: "{{ vm_tools_status }}"
+            vm_datacenter: "{{ vm_datacenter }}"
+            vm_folder: "{{ vm_folder | default('') }}"
+          tags:
+            - "vmware"
+            - "{{ vm_environment }}"
+            - "{{ vm_criticality }}-priority"
+            - "{{ 'windows' if vm_is_windows else 'linux' if vm_is_linux else 'other' }}"
+            - "{{ vm_power_state | lower }}"
+
+    - name: ➕ Criar VM no NetBox (se não existir)
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: "{{ netbox_vm_data }}"
+        status_code: [200, 201, 400]
+      register: create_vm_result
+      delegate_to: localhost
+      when:
+        - not dry_run
+        - vm_exists.json.count == 0
+      failed_when:
+        - create_vm_result.status not in [200, 201, 400]
+        - create_vm_result.status == 400 and 'already exists' not in (create_vm_result.json.detail | default(''))
+
+    - name: 🔄 Atualizar VM no NetBox (se existir e update_existing = true)
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ vm_exists.json.results[0].id }}/"
+        method: PATCH
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: "{{ netbox_vm_data }}"
+        status_code: [200, 400]
+      register: update_vm_result
+      delegate_to: localhost
+      when:
+        - not dry_run
+        - vm_exists.json.count > 0
+        - update_existing
+      failed_when:
+        - update_vm_result.status not in [200, 400]
+
+    - name: 🌐 Criar/Atualizar Interface de Rede Principal
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/interfaces/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          virtual_machine: "{{ (create_vm_result.json.id if create_vm_result is defined and create_vm_result.json is defined else vm_exists.json.results[0].id) }}"
+          name: "eth0"
+          type: "virtual"
+          enabled: true
+          description: "Interface principal - {{ vm_hostname | default('') }}"
+        status_code: [200, 201, 400]
+      register: interface_result
+      delegate_to: localhost
+      when:
+        - not dry_run
+        - vm_ip_addresses is defined
+        - vm_ip_addresses | length > 0
+
+    - name: 🔢 Criar/Atualizar Endereço IP
+      uri:
+        url: "{{ netbox_url }}/api/ipam/ip-addresses/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          address: "{{ vm_ip_addresses[0] }}/24"
+          status: "active"
+          dns_name: "{{ vm_hostname | default(vm_name) }}"
+          description: "IP da VM {{ vm_name }}"
+          assigned_object_type: "virtualization.vminterface"
+          assigned_object_id: "{{ interface_result.json.id if interface_result.json is defined else '' }}"
+        status_code: [200, 201, 400]
+      delegate_to: localhost
+      when:
+        - not dry_run
+        - vm_ip_addresses is defined
+        - vm_ip_addresses | length > 0
+        - interface_result is defined
+        - interface_result.json is defined
+
+    - name: 📝 Log do resultado (modo normal)
+      debug:
+        msg: |
+          {% if create_vm_result is defined and create_vm_result.status in [200, 201] %}
+          ✅ VM {{ vm_name }} criada com sucesso no NetBox
+          {% elif update_vm_result is defined and update_vm_result.status == 200 %}
+          🔄 VM {{ vm_name }} atualizada com sucesso no NetBox
+          {% elif vm_exists.json.count > 0 %}
+          ℹ️  VM {{ vm_name }} já existe no NetBox
+          {% else %}
+          ❌ Falha ao processar VM {{ vm_name }}
+          {% endif %}
+      when: not dry_run
+
+    - name: 📝 Log do resultado (modo dry run)
+      debug:
+        msg: |
+          🔍 DRY RUN - VM {{ vm_name }}:
+          ├─ Nome: {{ vm_name }}
+          ├─ IP: {{ vm_ip_addresses[0] if vm_ip_addresses is defined and vm_ip_addresses | length > 0 else 'N/A' }}
+          ├─ SO: {{ vm_guest_os }}
+          ├─ Estado: {{ vm_power_state }}
+          ├─ CPU: {{ vm_cpu_count }} cores
+          ├─ Memória: {{ vm_memory_gb }}GB
+          ├─ Ambiente: {{ vm_environment }}
+          └─ Criticidade: {{ vm_criticality }}
+      when: dry_run
+
+- name: 📊 Relatório Final de Sincronização
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+  run_once: true
+
+  tasks:
+    - name: 📋 Gerar estatísticas finais
+      debug:
+        msg: |
+
+          ╔════════════════════════════════════════════════╗
+          ║           RELATÓRIO DE SINCRONIZAÇÃO           ║
+          ║              VMWARE → NETBOX                   ║
+          ╠════════════════════════════════════════════════╣
+          ║ 🎯 Total de VMs processadas: {{ ansible_play_hosts | length }}               ║
+          ║ 🌐 NetBox URL: {{ netbox_url }}
+          ║ 🔄 Modo: {{ 'DRY RUN (simulação)' if dry_run else 'PRODUÇÃO (real)' }}                    ║
+          ║ ⏰ Executado em: {{ ansible_date_time.iso8601 }}     ║
+          ╚════════════════════════════════════════════════╝
+
+          💡 Para executar em modo de produção:
+             Desmarque a variável 'dry_run' ou defina como false
+
+          🔧 Para customizar:
+             • batch_size: Tamanho do lote de processamento
+             • update_existing: Atualizar VMs existentes
+             • create_missing_objects: Criar objetos faltantes

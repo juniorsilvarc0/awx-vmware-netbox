@@ -1,5 +1,2 @@
-# inventory.yml
-plugin: script
-script: ./scripts/vmware_dynamic_inventory.py
-cache: true
-cache_timeout: 300
+#!/usr/bin/env bash
+exec /usr/bin/env python3 "$(dirname "$0")/scripts/vmware_dynamic_inventory.py" "$@"

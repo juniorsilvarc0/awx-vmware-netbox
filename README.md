@@ -27,24 +27,24 @@ Este projeto **NÃO FAZ ALTERAÇÕES** nas VMs VMware. É exclusivamente para **
 ## 📁 Estrutura do Projeto
 
 ```
-vmware-inventory-awx/
+awx-vmware-netbox/
 ├── 📄 README.md                    # Este arquivo
 ├── 📄 requirements.txt             # Dependências Python
+├── 📄 CLAUDE.md                    # Configuração para Claude Code
 ├── ⚙️  ansible.cfg                 # Configuração do Ansible
+├── 📄 inventory.yml                # Inventário dinâmico principal
 │
-├── 📁 inventories/vmware/
-│   ├── 📄 vmware.yml              # Inventário dinâmico (credenciais via AWX)
-│   └── 📁 group_vars/
-│       ├── 📄 all.yml             # Variáveis globais (somente classificação)
-│       ├── 📄 windows.yml         # Informações classificativas Windows
-│       └── 📄 linux.yml           # Informações classificativas Linux
+├── 📁 group_vars/
+│   ├── 📄 all.yml                 # Variáveis globais (somente classificação)
+│   ├── 📄 windows.yml             # Informações classificativas Windows
+│   └── 📄 linux.yml               # Informações classificativas Linux
 │
 ├── 📁 scripts/
 │   ├── 📄 vmware_inventory.py     # Script Python para teste local
 │   └── 📄 vmware_monitor.py       # Script de monitoramento
 │
 ├── 📁 playbooks/
-│   ├── 📄 inventory_report.yml    # Relatórios do inventário
+│   ├── 📄 test_inventory.yml      # Relatórios do inventário
 │   └── 📄 vm_facts_collection.yml # Coleta detalhada de facts
 │
 └── 📁 roles/
@@ -82,7 +82,7 @@ pip install -r requirements.txt
    ```yaml
    Name: VMware Inventory Project
    SCM Type: Git
-   SCM URL: https://github.com/seu-usuario/vmware-inventory-awx.git
+   SCM URL: https://github.com/seu-usuario/awx-vmware-netbox.git
    SCM Branch: main
    Update Revision on Launch: ✅
    Clean: ✅
@@ -117,7 +117,7 @@ pip install -r requirements.txt
    Name: VMware vCenter Source
    Source: Sourced from a Project
    Project: VMware Inventory Project
-   Inventory File: inventories/vmware/vmware.yml
+   Inventory File: inventory.yml
    Credential: VMware vCenter Read-Only Credential
    Update on Launch: ✅
    Overwrite: ✅
@@ -141,7 +141,7 @@ Name: VMware Inventory Report
 Job Type: Run
 Inventory: VMware Inventory (Read-Only)
 Project: VMware Inventory Project
-Playbook: playbooks/inventory_report.yml
+Playbook: playbooks/test_inventory.yml
 ```
 
 ### Coleta Detalhada de Facts
@@ -156,7 +156,7 @@ Playbook: playbooks/vm_facts_collection.yml
 
 ## 📚 Playbooks Disponíveis
 
-### 🔍 inventory_report.yml
+### 🔍 test_inventory.yml
 
 **Gera relatório completo do inventário** com:
 
@@ -180,7 +180,7 @@ Playbook: playbooks/vm_facts_collection.yml
 
 ### Modificar Agrupamentos
 
-Edite `inventories/vmware/vmware.yml`:
+Edite `inventory.yml`:
 
 ```yaml
 groups:
@@ -196,7 +196,7 @@ groups:
 
 ### Adicionar Variáveis de Classificação
 
-Em `inventories/vmware/group_vars/all.yml`:
+Em `group_vars/all.yml`:
 
 ```yaml
 # Suas classificações customizadas
@@ -262,6 +262,13 @@ Exemplo de playbook personalizado:
 ansible_verbosity: 3
 ```
 
+#### 📁 Erro de Inventory File
+
+Se o AWX não aceitar o caminho do arquivo:
+
+- ✅ Use: `inventory.yml` (arquivo na raiz)
+- ❌ Não use: `inventories/vmware/vmware.yml` (caminhos aninhados)
+
 ### Validação Manual
 
 Teste o script Python localmente:
@@ -269,6 +276,26 @@ Teste o script Python localmente:
 ```bash
 cd scripts/
 python3 vmware_inventory.py --list
+```
+
+### Logs Importantes
+
+- **AWX**: Interface do AWX → Jobs → View Details
+- **Inventory Sync**: Logs na própria source
+- **Ansible**: Logs dos job templates
+
+## 🤖 Claude Code
+
+Este projeto inclui configuração específica para **Claude Code** no arquivo `CLAUDE.md`. Para usar:
+
+```bash
+# Configurar contexto do projeto
+export CLAUDE_PROJECT_TYPE="vmware-inventory"
+export CLAUDE_RESTRICTION_MODE="readonly"
+
+# Usar Claude Code para desenvolvimento
+claude create playbook --type report --target "grupo_vms"
+claude validate --file "inventory.yml"
 ```
 
 ## 📞 Suporte

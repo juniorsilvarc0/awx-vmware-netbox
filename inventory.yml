@@ -1,43 +1,33 @@
-plugin: vmware.vmware.vms
-validate_certs: false
-gather_tags: true
+all:
+  children:
+    vmware_vms:
+      hosts:
+        # Template para adicionar VMs manualmente
+        # vm-example:
+        #   ansible_host: 192.168.1.100
+        #   vm_name: "vm-example"
+        #   vm_power_state: "poweredOn"
+        #   vm_guest_os: "Windows Server 2019"
+        #   vm_cpu_count: 4
+        #   vm_memory_mb: 8192
+        #   vm_datacenter: "ATI-SLC-HCI"
+        #   vm_cluster: "Cluster01"
+      vars:
+        # Variáveis globais para todas as VMs
+        vcenter_hostname: "vcsa04.ati.pi.gov.br"
+        datacenter_name: "ATI-SLC-HCI"
+        validate_certs: false
+        inventory_type: "static_vmware"
 
-properties:
-  - name
-  - config.uuid
-  - config.guestFullName
-  - config.template
-  - runtime.powerState
-  - summary.config.numCpu
-  - summary.config.memorySizeMB
-  - guest.guestFamily
-  - guest.hostName
-  - guest.ipAddress
-  - guest.toolsStatus
-  - cluster
-  - datacenter
+    # Grupos por estado (inicialmente vazios)
+    powered_on:
+      hosts:
 
-filter_expressions:
-  - "config.template == false"
+    powered_off:
+      hosts:
 
-groups:
-  powered_on: summary.runtime.powerState == "poweredOn"
-  powered_off: summary.runtime.powerState == "poweredOff"
-  windows: config.guestFullName | regex_search("Windows")
-  linux: config.guestFullName | regex_search("Linux")
+    windows:
+      hosts:
 
-compose:
-  ansible_host: guest.ipAddress | default(ansible_host)
-  vm_name: name
-  vm_power_state: summary.runtime.powerState
-  vm_cpu_count: summary.config.numCpu
-  vm_memory_mb: summary.config.memorySizeMB
-
-keyed_groups:
-  - key: summary.runtime.powerState
-    separator: ""
-  - key: guest.guestFamily
-    separator: ""
-
-cache: true
-cache_timeout: 3600
+    linux:
+      hosts:

@@ -8,6 +8,14 @@
     netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') | default('') }}"
 
   tasks:
+    - name: DEBUG - Variáveis de ambiente NetBox
+      debug:
+        msg:
+          - "NETBOX_API: {{ netbox_url }}"
+          - "NETBOX_TOKEN definido: {{ netbox_token != '' }}"
+          - "Inventário recebido: {{ vm_name | default('não definido') }}"
+      run_once: true
+
     - name: Validar configuração
       fail:
         msg: |

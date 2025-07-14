@@ -64,21 +64,21 @@
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          name: "{{ vm_name }}"
-          cluster: "{{ vm_cluster | default('Default Cluster') }}"
-          platform: "{{ vm_guest_os | default('Unknown OS') }}"
-          vcpus: "{{ vm_cpu_count | default(1) }}"
-          memory: "{{ vm_memory_mb | default(1024) }}"
+          name: "{{ vm_name | regex_replace('[\"\\'\\\\]', '') }}"
+          cluster: "{{ vm_cluster | default('Default Cluster') | regex_replace('[\"\\'\\\\]', '') }}"
+          platform: "{{ vm_guest_os | default('Unknown OS') | regex_replace('[\"\\'\\\\]', '') }}"
+          vcpus: "{{ vm_cpu_count | default(1) | int }}"
+          memory: "{{ vm_memory_mb | default(1024) | int }}"
           status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
           custom_fields:
-            vm_uuid: "{{ vm_uuid }}"
-            vm_folder: "{{ vm_folder | default('') }}"
-            vm_environment: "{{ vm_environment | default('unknown') }}"
-            vm_criticality: "{{ vm_criticality | default('low') }}"
-            vm_cpu_category: "{{ vm_cpu_category | default('') }}"
-            vm_memory_category: "{{ vm_memory_category | default('') }}"
-            tools_status: "{{ vm_tools_status | default('') }}"
-            guest_family: "{{ vm_guest_family | default('') }}"
+            vm_uuid: "{{ vm_uuid | default('') | regex_replace('[\"\\'\\\\]', '') }}"
+            vm_folder: "{{ vm_folder | default('') | regex_replace('[\"\\'\\\\]', '') }}"
+            vm_environment: "{{ vm_environment | default('unknown') | regex_replace('[\"\\'\\\\]', '') }}"
+            vm_criticality: "{{ vm_criticality | default('low') | regex_replace('[\"\\'\\\\]', '') }}"
+            vm_cpu_category: "{{ vm_cpu_category | default('') | regex_replace('[\"\\'\\\\]', '') }}"
+            vm_memory_category: "{{ vm_memory_category | default('') | regex_replace('[\"\\'\\\\]', '') }}"
+            tools_status: "{{ vm_tools_status | default('') | regex_replace('[\"\\'\\\\]', '') }}"
+            guest_family: "{{ vm_guest_family | default('') | regex_replace('[\"\\'\\\\]', '') }}"
         state: present
       delegate_to: localhost
       when:
@@ -91,12 +91,13 @@
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          virtual_machine: "{{ vm_name }}"
+          virtual_machine: "{{ vm_name | regex_replace('[\"\\'\\\\]', '') }}"
           name: "eth0"
           enabled: true
           type: "virtual"
         state: present
       delegate_to: localhost
+      register: vm_interface_result
       when:
         - vm_name is defined
         - vm_name != 'localhost'
@@ -110,8 +111,8 @@
         data:
           address: "{{ vm_ip_addresses[0] }}/24"
           assigned_object_type: "virtualization.vminterface"
-          assigned_object_id: "{{ vm_interface_result.msg.id | default(omit) }}"
-          dns_name: "{{ vm_hostname | default('') }}"
+          assigned_object_id: "{{ vm_interface_result.msg.id if vm_interface_result is defined else omit }}"
+          dns_name: "{{ vm_hostname | default('') | regex_replace('[\"\\'\\\\]', '') }}"
           status: active
         state: present
       delegate_to: localhost
@@ -119,6 +120,7 @@
         - vm_name is defined
         - vm_name != 'localhost'
         - vm_ip_addresses is defined
+        - vm_interface_result is defined
 
     # Relatório de sincronização
     - name: Generate sync report

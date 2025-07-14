@@ -1,14 +1,50 @@
 ---
-- name: Sync VMware VMs from AWX Inventory to NetBox
-  hosts: all
-  gather_facts: false
+- name: Sync VMware VMs from AWX Dynamic Inventory to NetBox
+  hosts: localhost
+  gather_facts: true
   vars:
     netbox_url: "{{ lookup('env', 'NETBOX_API') }}"
     netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
     datacenter_name: "ATI-SLC-HCI"
+    default_ip_subnet: "24"
+    vm_role: "server"
+    tenant_name: "ATI"
 
   tasks:
-    # Criar site no NetBox se não existir
+    # Debug para entender a estrutura do inventário
+    - name: Debug inventory structure
+      debug:
+        msg:
+          - "Groups: {{ groups.keys() | list }}"
+          - "All hosts: {{ groups['all'] | default([]) }}"
+      when: debug_mode | default(false)
+
+    # Verificar conectividade com o NetBox
+    - name: Test NetBox connectivity
+      uri:
+        url: "{{ netbox_url }}/api/"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        status_code: 200
+      register: netbox_test
+
+    - name: Show NetBox connection status
+      debug:
+        msg: "✓ NetBox connectivity OK - Version: {{ netbox_test.json.version | default('Unknown') }}"
+
+    # Criar tenant se não existir
+    - name: Create NetBox Tenant
+      netbox.netbox.netbox_tenant:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ tenant_name }}"
+          slug: "{{ tenant_name | lower }}"
+        state: present
+      ignore_errors: true
+
+    # Criar site no NetBox
     - name: Create NetBox Site
       netbox.netbox.netbox_site:
         netbox_url: "{{ netbox_url }}"
@@ -17,10 +53,10 @@
           name: "{{ datacenter_name }}"
           slug: "{{ datacenter_name | lower | replace('_', '-') }}"
           status: active
+          tenant: "{{ tenant_name }}"
         state: present
-      delegate_to: localhost
 
-    # Criar cluster no NetBox se não existir
+    # Criar tipo de cluster
     - name: Create NetBox Cluster Type
       netbox.netbox.netbox_cluster_type:
         netbox_url: "{{ netbox_url }}"
@@ -29,105 +65,165 @@
           name: "VMware vSphere"
           slug: "vmware-vsphere"
         state: present
-      delegate_to: localhost
 
-    # Criar cluster no NetBox
-    - name: Create NetBox Cluster
+    # Criar role para VMs
+    - name: Create NetBox Device Role
+      netbox.netbox.netbox_device_role:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_role | title }}"
+          slug: "{{ vm_role }}"
+          color: "2196f3"
+          vm_role: true
+        state: present
+      ignore_errors: true
+
+    # Coletar e processar dados do inventário dinâmico
+    - name: Collect inventory data
+      set_fact:
+        vm_inventory: "{{ hostvars }}"
+
+    # Filtrar apenas hosts com dados de VM válidos
+    - name: Filter valid VM hosts
+      set_fact:
+        valid_vm_hosts: >-
+          {{ hostvars.keys() | list | 
+             select('extract', hostvars, 'vm_name') |
+             select('extract', hostvars, 'vm_name', 'defined') |
+             reject('match', 'localhost') |
+             list }}
+
+    - name: Show valid VMs found
+      debug:
+        msg: "Found {{ valid_vm_hosts | length }} valid VMs in inventory"
+
+    # Coletar clusters únicos
+    - name: Get unique clusters
+      set_fact:
+        unique_clusters: >-
+          {{ valid_vm_hosts | 
+             map('extract', hostvars, 'vm_cluster') | 
+             select('defined') | 
+             unique | 
+             list }}
+
+    # Criar clusters no NetBox
+    - name: Create NetBox Clusters
       netbox.netbox.netbox_cluster:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          name: "{{ vm_cluster | default('Default Cluster') }}"
+          name: "{{ item }}"
           type: "VMware vSphere"
           site: "{{ datacenter_name }}"
+          tenant: "{{ tenant_name }}"
         state: present
-      delegate_to: localhost
-      when: vm_cluster is defined
-      run_once: true
+      loop: "{{ unique_clusters }}"
+      when: unique_clusters | length > 0
 
-    # Criar plataforma no NetBox
-    - name: Create NetBox Platform
+    # Coletar sistemas operacionais únicos
+    - name: Get unique operating systems
+      set_fact:
+        unique_os: >-
+          {{ valid_vm_hosts | 
+             map('extract', hostvars, 'vm_guest_os') | 
+             select('defined') | 
+             unique | 
+             list }}
+
+    # Criar plataformas no NetBox
+    - name: Create NetBox Platforms
       netbox.netbox.netbox_platform:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          name: "{{ vm_guest_os | default('Unknown OS') }}"
-          slug: "{{ vm_guest_os | default('unknown-os') | lower | regex_replace('[^a-z0-9-]', '-') }}"
+          name: "{{ item }}"
+          slug: "{{ item | lower | regex_replace('[^a-z0-9-]', '-') | regex_replace('-+', '-') | regex_replace('^-|-$', '') }}"
         state: present
-      delegate_to: localhost
-      when: vm_guest_os is defined
-      run_once: true
+      loop: "{{ unique_os }}"
+      when: unique_os | length > 0
 
-    # Sincronizar VMs do inventário para o NetBox
-    - name: Sync VM to NetBox
+    # Processar cada VM individualmente
+    - name: "Sync VM {{ hostvars[item].vm_name }} to NetBox"
       netbox.netbox.netbox_virtual_machine:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          name: "{{ vm_name | regex_replace('[\"\\'\\\\]', '') }}"
-          cluster: "{{ vm_cluster | default('Default Cluster') | regex_replace('[\"\\'\\\\]', '') }}"
-          platform: "{{ vm_guest_os | default('Unknown OS') | regex_replace('[\"\\'\\\\]', '') }}"
-          vcpus: "{{ vm_cpu_count | default(1) | int }}"
-          memory: "{{ vm_memory_mb | default(1024) | int }}"
-          status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
-          custom_fields:
-            vm_uuid: "{{ vm_uuid | default('') | regex_replace('[\"\\'\\\\]', '') }}"
-            vm_folder: "{{ vm_folder | default('') | regex_replace('[\"\\'\\\\]', '') }}"
-            vm_environment: "{{ vm_environment | default('unknown') | regex_replace('[\"\\'\\\\]', '') }}"
-            vm_criticality: "{{ vm_criticality | default('low') | regex_replace('[\"\\'\\\\]', '') }}"
-            vm_cpu_category: "{{ vm_cpu_category | default('') | regex_replace('[\"\\'\\\\]', '') }}"
-            vm_memory_category: "{{ vm_memory_category | default('') | regex_replace('[\"\\'\\\\]', '') }}"
-            tools_status: "{{ vm_tools_status | default('') | regex_replace('[\"\\'\\\\]', '') }}"
-            guest_family: "{{ vm_guest_family | default('') | regex_replace('[\"\\'\\\\]', '') }}"
+          name: "{{ hostvars[item].vm_name | regex_replace('[\"\\'\\\\]', '') }}"
+          cluster: "{{ hostvars[item].vm_cluster | default('Default Cluster') | regex_replace('[\"\\'\\\\]', '') }}"
+          platform: "{{ hostvars[item].vm_guest_os | default('Unknown OS') | regex_replace('[\"\\'\\\\]', '') }}"
+          role: "{{ vm_role }}"
+          tenant: "{{ tenant_name }}"
+          vcpus: "{{ hostvars[item].vm_cpu_count | default(1) | int }}"
+          memory: "{{ hostvars[item].vm_memory_mb | default(1024) | int }}"
+          status: "{{ 'active' if hostvars[item].vm_power_state == 'poweredOn' else 'offline' }}"
+          comments: |
+            Imported from AWX Dynamic Inventory
+            UUID: {{ hostvars[item].vm_uuid | default('N/A') }}
+            Folder: {{ hostvars[item].vm_folder | default('N/A') }}
+            Environment: {{ hostvars[item].vm_environment | default('unknown') }}
+            Criticality: {{ hostvars[item].vm_criticality | default('low') }}
+            CPU Category: {{ hostvars[item].vm_cpu_category | default('N/A') }}
+            Memory Category: {{ hostvars[item].vm_memory_category | default('N/A') }}
+            Tools Status: {{ hostvars[item].vm_tools_status | default('N/A') }}
+            Guest Family: {{ hostvars[item].vm_guest_family | default('N/A') }}
+            Last Updated: {{ ansible_date_time.iso8601 }}
         state: present
-      delegate_to: localhost
-      when:
-        - vm_name is defined
-        - vm_name != 'localhost'
+      register: vm_create_result
+      ignore_errors: true
+      loop: "{{ valid_vm_hosts }}"
+      when: valid_vm_hosts | length > 0
 
-    # Criar interfaces de rede para as VMs
-    - name: Create VM Network Interface
+    # Criar interfaces de rede para VMs com IP
+    - name: "Create network interface for {{ hostvars[item].vm_name }}"
       netbox.netbox.netbox_vm_interface:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          virtual_machine: "{{ vm_name | regex_replace('[\"\\'\\\\]', '') }}"
+          virtual_machine: "{{ hostvars[item].vm_name | regex_replace('[\"\\'\\\\]', '') }}"
           name: "eth0"
           enabled: true
           type: "virtual"
+          description: "Primary network interface"
         state: present
-      delegate_to: localhost
-      register: vm_interface_result
+      loop: "{{ valid_vm_hosts }}"
       when:
-        - vm_name is defined
-        - vm_name != 'localhost'
-        - vm_ip_addresses is defined
+        - valid_vm_hosts | length > 0
+        - hostvars[item].vm_ip_addresses is defined
+        - hostvars[item].vm_ip_addresses | length > 0
+      register: interface_create_result
+      ignore_errors: true
 
-    # Criar endereços IP para as VMs
-    - name: Create VM IP Address
+    # Criar endereços IP
+    - name: "Create IP address for {{ hostvars[item].vm_name }}"
       netbox.netbox.netbox_ip_address:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          address: "{{ vm_ip_addresses[0] }}/24"
-          assigned_object_type: "virtualization.vminterface"
-          assigned_object_id: "{{ vm_interface_result.msg.id if vm_interface_result is defined else omit }}"
-          dns_name: "{{ vm_hostname | default('') | regex_replace('[\"\\'\\\\]', '') }}"
+          address: "{{ hostvars[item].vm_ip_addresses[0] }}/{{ default_ip_subnet }}"
           status: active
+          dns_name: "{{ hostvars[item].vm_hostname | default('') | regex_replace('[\"\\'\\\\]', '') }}"
+          description: "Primary IP address for {{ hostvars[item].vm_name }}"
+          tenant: "{{ tenant_name }}"
         state: present
-      delegate_to: localhost
+      loop: "{{ valid_vm_hosts }}"
       when:
-        - vm_name is defined
-        - vm_name != 'localhost'
-        - vm_ip_addresses is defined
-        - vm_interface_result is defined
+        - valid_vm_hosts | length > 0
+        - hostvars[item].vm_ip_addresses is defined
+        - hostvars[item].vm_ip_addresses | length > 0
+      register: ip_create_result
+      ignore_errors: true
 
-    # Relatório de sincronização
-    - name: Generate sync report
+    # Relatório final
+    - name: Generate final sync report
       debug:
         msg:
-          - "Synchronization completed!"
-          - "VM processed: {{ vm_name | default('N/A') }}"
+          - "=== VMware to NetBox Synchronization Report ==="
+          - "Total valid VMs processed: {{ valid_vm_hosts | length }}"
+          - "Unique clusters: {{ unique_clusters | length }}"
+          - "Unique OS platforms: {{ unique_os | length }}"
           - "NetBox URL: {{ netbox_url }}"
           - "Datacenter: {{ datacenter_name }}"
-      delegate_to: localhost
+          - "Tenant: {{ tenant_name }}"
+          - "=== Synchronization Complete ==="

@@ -1,0 +1,43 @@
+{
+  "awx_url": "https://your-awx-instance.com",
+  "awx_token": "",
+  "inventory_id": 1,
+  "netbox_url": "https://your-netbox-instance.com",
+  "netbox_token": "",
+  "default_site": "ATI-SLC-HCI",
+  "default_tenant": "ATI",
+  "default_cluster_type": "VMware vSphere",
+  "default_role": "server",
+  "verify_ssl": false,
+  "log_level": "INFO",
+  "sync_options": {
+    "create_missing_objects": true,
+    "update_existing_vms": true,
+    "sync_ip_addresses": true,
+    "sync_interfaces": true,
+    "batch_size": 50
+  },
+  "field_mappings": {
+    "vm_name": "name",
+    "vm_cpu_count": "vcpus",
+    "vm_memory_mb": "memory",
+    "vm_power_state": "status",
+    "vm_ip_addresses": "primary_ip",
+    "vm_guest_os": "platform",
+    "vm_cluster": "cluster",
+    "vm_uuid": "comments",
+    "vm_folder": "comments",
+    "vm_environment": "tags",
+    "vm_criticality": "tags"
+  },
+  "status_mappings": {
+    "poweredOn": "active",
+    "poweredOff": "offline",
+    "suspended": "staged"
+  },
+  "filters": {
+    "skip_templates": true,
+    "skip_localhost": true,
+    "required_fields": ["vm_name"]
+  }
+}

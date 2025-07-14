@@ -1,5 +1,5 @@
 ---
-- name: Sync VMware VMs from AWX Dynamic Inventory to NetBox
+- name: 📊 Sync VMware VMs from AWX Dynamic Inventory to NetBox
   hosts: all
   gather_facts: false
   vars:
@@ -10,22 +10,54 @@
     default_ip_subnet: "24"
     vm_role: "server"
     tenant_name: "ATI"
+    
+    # Enhanced sync options
+    sync_options:
+      create_missing_objects: true
+      update_existing_vms: true
+      sync_ip_addresses: true
+      sync_interfaces: true
+      add_tags: true
+      enable_reporting: true
+    
+    # Statistics tracking
+    sync_stats:
+      total_hosts: 0
+      valid_vms: 0
+      synced_vms: 0
+      failed_vms: 0
+      skipped_hosts: 0
 
   tasks:
-    # Verificar se é uma VM válida
-    - name: Check if host is a valid VM
+    # 📋 Initialize sync statistics
+    - name: 📋 Initialize sync statistics
       set_fact:
-        is_valid_vm: "{{ vm_name is defined and vm_name != 'localhost' and vm_name != inventory_hostname }}"
+        sync_stats: "{{ sync_stats | combine({'total_hosts': groups['all'] | length}) }}"
+      run_once: true
 
-    # Mostrar informações da VM atual
-    - name: Show VM info
+    # 🔍 Verificar se é uma VM válida
+    - name: 🔍 Check if host is a valid VM
+      set_fact:
+        is_valid_vm: "{{ vm_name is defined and vm_name != 'localhost' and vm_name != inventory_hostname and vm_name != 'N/A' }}"
+
+    # ⏭️ Skip invalid hosts
+    - name: ⏭️ Skip invalid hosts
+      meta: end_host
+      when: not is_valid_vm
+
+    # 📊 Mostrar informações da VM atual
+    - name: 📊 Show VM processing info
       debug:
         msg:
-          - "Processing host: {{ inventory_hostname }}"
-          - "VM Name: {{ vm_name | default('N/A') }}"
-          - "VM Power State: {{ vm_power_state | default('N/A') }}"
-          - "VM IP: {{ vm_ip_addresses[0] | default('N/A') if vm_ip_addresses is defined else 'N/A' }}"
-          - "Is Valid VM: {{ is_valid_vm }}"
+          - "🖥️  Processing VM: {{ vm_name }}"
+          - "⚡ Power State: {{ vm_power_state | default('N/A') }}"
+          - "🌐 IP Address: {{ vm_ip_addresses[0] | default('N/A') if vm_ip_addresses is defined else 'N/A' }}"
+          - "💻 Guest OS: {{ vm_guest_os | default('N/A') }}"
+          - "🏢 Cluster: {{ vm_cluster | default('N/A') }}"
+          - "📊 CPU Count: {{ vm_cpu_count | default('N/A') }}"
+          - "🧠 Memory MB: {{ vm_memory_mb | default('N/A') }}"
+          - "🏷️  Environment: {{ vm_environment | default('unknown') }}"
+          - "🔴 Criticality: {{ vm_criticality | default('low') }}"
       when: is_valid_vm
 
     # Criar tenant (run_once para evitar duplicações)
@@ -181,12 +213,127 @@
       register: ip_result
       ignore_errors: true
 
-    # Mostrar resultado
-    - name: "Show sync result for {{ vm_name }}"
+    # 📊 Mostrar resultado da sincronização
+    - name: "📊 Show sync result for {{ vm_name }}"
       debug:
         msg:
-          - "VM: {{ vm_name }}"
-          - "Sync Status: {{ 'SUCCESS' if vm_sync_result is succeeded else 'FAILED' }}"
-          - "IP Created: {{ 'YES' if ip_result is succeeded else 'NO' }}"
-          - "Interface Created: {{ 'YES' if interface_result is succeeded else 'NO' }}"
+          - "🖥️  VM: {{ vm_name }}"
+          - "✅ Sync Status: {{ '✅ SUCCESS' if vm_sync_result is succeeded else '❌ FAILED' }}"
+          - "🌐 IP Created: {{ '✅ YES' if ip_result is succeeded else '❌ NO' }}"
+          - "🔌 Interface Created: {{ '✅ YES' if interface_result is succeeded else '❌ NO' }}"
       when: is_valid_vm
+
+    # 📊 Create tags for VM classification
+    - name: "📊 Create NetBox tags for {{ vm_name }}"
+      netbox.netbox.netbox_tag:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ item }}"
+          slug: "{{ item | lower | regex_replace('[^a-z0-9-]', '-') }}"
+          color: "{{ tag_colors[item] | default('9e9e9e') }}"
+        state: present
+      loop:
+        - "env-{{ vm_environment | default('unknown') }}"
+        - "criticality-{{ vm_criticality | default('low') }}"
+        - "awx-managed"
+        - "vmware-vm"
+      vars:
+        tag_colors:
+          env-production: "f44336"
+          env-development: "4caf50"
+          env-testing: "ff9800"
+          env-unknown: "9e9e9e"
+          criticality-high: "f44336"
+          criticality-medium: "ff9800"
+          criticality-low: "4caf50"
+          awx-managed: "2196f3"
+          vmware-vm: "607d8b"
+      when: 
+        - is_valid_vm
+        - sync_options.add_tags
+        - vm_sync_result is succeeded
+      ignore_errors: true
+
+    # 🏷️ Assign tags to VM
+    - name: "🏷️ Assign tags to VM {{ vm_name }}"
+      netbox.netbox.netbox_virtual_machine:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_name | regex_replace('[\"''\\\\]', '') }}"
+          tags:
+            - "env-{{ vm_environment | default('unknown') }}"
+            - "criticality-{{ vm_criticality | default('low') }}"
+            - "awx-managed"
+            - "vmware-vm"
+        state: present
+      when: 
+        - is_valid_vm
+        - sync_options.add_tags
+        - vm_sync_result is succeeded
+      ignore_errors: true
+
+# 📊 Final Statistics and Reporting
+- name: 📊 Generate Sync Statistics Report
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: 📈 Calculate final statistics
+      set_fact:
+        final_stats:
+          total_hosts: "{{ groups['all'] | length }}"
+          valid_vms: "{{ groups['all'] | length - (ansible_play_hosts_all | default([]) | length) }}"
+          sync_duration: "{{ ansible_date_time.epoch | int - (start_time | default(ansible_date_time.epoch)) | int }}"
+          sync_timestamp: "{{ ansible_date_time.iso8601 }}"
+          environment_breakdown: "{{ hostvars | dict2items | selectattr('value.vm_environment', 'defined') | map(attribute='value.vm_environment') | list | unique }}"
+          criticality_breakdown: "{{ hostvars | dict2items | selectattr('value.vm_criticality', 'defined') | map(attribute='value.vm_criticality') | list | unique }}"
+
+    - name: 📊 Display Final Sync Report
+      debug:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════╗
+          ║                   🚀 AWX → NetBox Sync Report                 ║
+          ╠════════════════════════════════════════════════════════════════╣
+          ║ 📊 Total Hosts Processed: {{ final_stats.total_hosts | default(0) }}                           ║
+          ║ ✅ Valid VMs Found: {{ final_stats.valid_vms | default(0) }}                                ║
+          ║ ⏱️  Sync Duration: {{ final_stats.sync_duration | default(0) }} seconds                      ║
+          ║ 🕐 Completed At: {{ final_stats.sync_timestamp }}        ║
+          ║                                                                ║
+          ║ 🏷️  Environment Categories:                                   ║
+          ║    {{ final_stats.environment_breakdown | join(', ') }}       ║
+          ║                                                                ║
+          ║ 🔴 Criticality Levels:                                        ║
+          ║    {{ final_stats.criticality_breakdown | join(', ') }}       ║
+          ║                                                                ║
+          ║ 🎯 NetBox Instance: {{ netbox_url }}                          ║
+          ║ 🏢 Tenant: {{ tenant_name }}                                  ║
+          ║ 🏗️  Site: {{ datacenter_name }}                              ║
+          ╚════════════════════════════════════════════════════════════════╝
+
+    - name: 📝 Export sync report to JSON
+      copy:
+        content: |
+          {
+            "sync_report": {
+              "timestamp": "{{ final_stats.sync_timestamp }}",
+              "duration_seconds": {{ final_stats.sync_duration | default(0) }},
+              "statistics": {
+                "total_hosts": {{ final_stats.total_hosts | default(0) }},
+                "valid_vms": {{ final_stats.valid_vms | default(0) }},
+                "environments": {{ final_stats.environment_breakdown | to_json }},
+                "criticality_levels": {{ final_stats.criticality_breakdown | to_json }}
+              },
+              "configuration": {
+                "netbox_url": "{{ netbox_url }}",
+                "tenant": "{{ tenant_name }}",
+                "site": "{{ datacenter_name }}",
+                "default_role": "{{ vm_role }}",
+                "sync_options": {{ sync_options | to_json }}
+              }
+            }
+          }
+        dest: "/tmp/awx_netbox_sync_report_{{ ansible_date_time.epoch }}.json"
+      when: sync_options.enable_reporting

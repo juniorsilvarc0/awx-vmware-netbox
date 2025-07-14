@@ -33,3 +33,8 @@ jsonschema>=4.17.0
 # Cache e performance
 redis>=4.3.0  # Opcional para cache Redis
 memcached>=1.5.0  # Opcional para cache Memcached
+
+# NetBox integration
+netbox-python>=7.3.0  # NetBox API client
+pynetbox>=7.3.0  # Alternative NetBox Python client
+netbox.netbox>=3.21.0  # NetBox Ansible collection

@@ -1,0 +1,14 @@
+---
+# Ansible Collections required for AWX to NetBox sync
+collections:
+  - name: netbox.netbox
+    version: ">=3.21.0"
+    source: https://galaxy.ansible.com
+  
+  - name: community.vmware
+    version: ">=3.0.0"
+    source: https://galaxy.ansible.com
+    
+  - name: ansible.posix
+    version: ">=1.4.0"
+    source: https://galaxy.ansible.com

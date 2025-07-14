@@ -1,0 +1,373 @@
+---
+- name: 🚀 AWX Job Template - Sync VMware VMs to NetBox
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    
+    # NetBox connection - usando Custom Credential Type
+    netbox_url: "{{ netbox_api_url }}"
+    netbox_token: "{{ netbox_api_token }}"
+    
+    # Configurações padrão
+    datacenter_name: "{{ awx_netbox_datacenter | default('ATI-SLC-HCI') }}"
+    tenant_name: "{{ awx_netbox_tenant | default('ATI') }}"
+    vm_role: "{{ awx_netbox_vm_role | default('server') }}"
+    default_ip_subnet: "{{ awx_netbox_subnet | default('24') }}"
+    
+    # Opções de sincronização
+    sync_options:
+      create_missing_objects: "{{ awx_netbox_create_objects | default(true) }}"
+      update_existing_vms: "{{ awx_netbox_update_vms | default(true) }}"
+      sync_ip_addresses: "{{ awx_netbox_sync_ips | default(true) }}"
+      sync_interfaces: "{{ awx_netbox_sync_interfaces | default(true) }}"
+      add_tags: "{{ awx_netbox_add_tags | default(true) }}"
+      enable_reporting: "{{ awx_netbox_enable_reporting | default(true) }}"
+      enable_debug: "{{ awx_netbox_debug | default(false) }}"
+    
+    # Estatísticas
+    job_stats:
+      start_time: "{{ ansible_date_time.epoch }}"
+      total_hosts: "{{ groups['all'] | length }}"
+      processed_vms: 0
+      success_count: 0
+      failed_count: 0
+      skipped_count: 0
+
+  tasks:
+    - name: 🎯 AWX Job Template - Inicializando Sync
+      debug:
+        msg:
+          - "╔══════════════════════════════════════════════════════════════════╗"
+          - "║                    🚀 AWX → NetBox Sync Job                     ║"
+          - "╠══════════════════════════════════════════════════════════════════╣"
+          - "║ 🏢 Tenant: {{ tenant_name }}                                    ║"
+          - "║ 🏗️  Site: {{ datacenter_name }}                                ║"
+          - "║ 📊 Total Hosts: {{ job_stats.total_hosts }}                     ║"
+          - "║ 🕐 Started: {{ ansible_date_time.iso8601 }}                     ║"
+          - "║ 🎯 NetBox URL: {{ netbox_url }}                                 ║"
+          - "╚══════════════════════════════════════════════════════════════════╝"
+      run_once: true
+
+    # Validação de credenciais
+    - name: 🔐 Validar credenciais NetBox
+      uri:
+        url: "{{ netbox_url }}/api/status/"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        validate_certs: false
+        status_code: 200
+      run_once: true
+      delegate_to: localhost
+
+    # 🔍 Verificar se é uma VM válida
+    - name: 🔍 Verificar se é uma VM válida
+      set_fact:
+        is_valid_vm: "{{ vm_name is defined and vm_name != 'localhost' and vm_name != inventory_hostname and vm_name != 'N/A' and vm_name != '' }}"
+
+    # ⏭️ Pular hosts inválidos
+    - name: ⏭️ Pular hosts inválidos
+      meta: end_host
+      when: not is_valid_vm
+
+    # 📊 Debug info (apenas se habilitado)
+    - name: 📊 Debug - Informações da VM
+      debug:
+        msg:
+          - "🖥️  VM: {{ vm_name }}"
+          - "⚡ Estado: {{ vm_power_state | default('N/A') }}"
+          - "🌐 IP: {{ vm_ip_addresses[0] | default('N/A') if vm_ip_addresses is defined else 'N/A' }}"
+          - "💻 OS: {{ vm_guest_os | default('N/A') }}"
+          - "🏢 Cluster: {{ vm_cluster | default('N/A') }}"
+      when: 
+        - is_valid_vm
+        - sync_options.enable_debug
+
+    # 🏢 Criar tenant
+    - name: 🏢 Criar NetBox Tenant
+      netbox.netbox.netbox_tenant:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ tenant_name }}"
+          slug: "{{ tenant_name | lower }}"
+        state: present
+        validate_certs: false
+      run_once: true
+      when: is_valid_vm
+      ignore_errors: true
+
+    # 🏗️ Criar site
+    - name: 🏗️ Criar NetBox Site
+      netbox.netbox.netbox_site:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ datacenter_name }}"
+          slug: "{{ datacenter_name | lower | replace('_', '-') }}"
+          status: active
+          tenant: "{{ tenant_name }}"
+        state: present
+        validate_certs: false
+      run_once: true
+      when: is_valid_vm
+
+    # 🔧 Criar cluster type
+    - name: 🔧 Criar NetBox Cluster Type
+      netbox.netbox.netbox_cluster_type:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "VMware vSphere"
+          slug: "vmware-vsphere"
+        state: present
+        validate_certs: false
+      run_once: true
+      when: is_valid_vm
+
+    # 👤 Criar device role
+    - name: 👤 Criar NetBox Device Role
+      netbox.netbox.netbox_device_role:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_role | title }}"
+          slug: "{{ vm_role }}"
+          color: "2196f3"
+          vm_role: true
+        state: present
+        validate_certs: false
+      run_once: true
+      when: is_valid_vm
+      ignore_errors: true
+
+    # 🏢 Criar cluster
+    - name: 🏢 Criar NetBox Cluster
+      netbox.netbox.netbox_cluster:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_cluster | default('Default Cluster') }}"
+          type: "VMware vSphere"
+          site: "{{ datacenter_name }}"
+          tenant: "{{ tenant_name }}"
+        state: present
+        validate_certs: false
+      when: 
+        - is_valid_vm
+        - vm_cluster is defined
+      ignore_errors: true
+
+    # 💻 Criar platform
+    - name: 💻 Criar NetBox Platform
+      netbox.netbox.netbox_platform:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_guest_os | default('Unknown OS') }}"
+          slug: "{{ vm_guest_os | default('unknown-os') | lower | regex_replace('[^a-z0-9-]', '-') | regex_replace('-+', '-') | regex_replace('^-|-$', '') }}"
+        state: present
+        validate_certs: false
+      when:
+        - is_valid_vm
+        - vm_guest_os is defined
+      ignore_errors: true
+
+    # 🖥️ Sincronizar VM
+    - name: "🖥️ Sincronizar VM {{ vm_name }} para NetBox"
+      netbox.netbox.netbox_virtual_machine:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_name | regex_replace('[\"''\\\\]', '') }}"
+          cluster: "{{ vm_cluster | default('Default Cluster') | regex_replace('[\"''\\\\]', '') }}"
+          platform: "{{ vm_guest_os | default('Unknown OS') | regex_replace('[\"''\\\\]', '') }}"
+          role: "{{ vm_role }}"
+          tenant: "{{ tenant_name }}"
+          vcpus: "{{ vm_cpu_count | default(1) | int }}"
+          memory: "{{ vm_memory_mb | default(1024) | int }}"
+          status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
+          comments: |
+            Sincronizado via AWX Job Template
+            Job ID: {{ awx_job_id | default('N/A') }}
+            Template: {{ awx_job_template_name | default('N/A') }}
+            
+            Detalhes da VM:
+            - UUID: {{ vm_uuid | default('N/A') }}
+            - Folder: {{ vm_folder | default('N/A') }}
+            - Environment: {{ vm_environment | default('unknown') }}
+            - Criticality: {{ vm_criticality | default('low') }}
+            - Tools Status: {{ vm_tools_status | default('N/A') }}
+            - Guest Family: {{ vm_guest_family | default('N/A') }}
+            
+            Última sincronização: {{ ansible_date_time.iso8601 }}
+        state: present
+        validate_certs: false
+      register: vm_sync_result
+      when: is_valid_vm
+      ignore_errors: true
+
+    # 🔌 Criar interface de rede
+    - name: "🔌 Criar interface de rede para {{ vm_name }}"
+      netbox.netbox.netbox_vm_interface:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          virtual_machine: "{{ vm_name | regex_replace('[\"''\\\\]', '') }}"
+          name: "eth0"
+          enabled: true
+          type: "virtual"
+          description: "Interface primária - Sync AWX"
+        state: present
+        validate_certs: false
+      when:
+        - is_valid_vm
+        - sync_options.sync_interfaces
+        - vm_ip_addresses is defined
+        - vm_ip_addresses | length > 0
+        - vm_sync_result is succeeded
+      register: interface_result
+      ignore_errors: true
+
+    # 🌐 Criar endereço IP
+    - name: "🌐 Criar endereço IP para {{ vm_name }}"
+      netbox.netbox.netbox_ip_address:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          address: "{{ vm_ip_addresses[0] }}/{{ default_ip_subnet }}"
+          status: active
+          dns_name: "{{ vm_hostname | default('') | regex_replace('[\"''\\\\]', '') }}"
+          description: "IP primário - {{ vm_name }} (AWX Sync)"
+          tenant: "{{ tenant_name }}"
+        state: present
+        validate_certs: false
+      when:
+        - is_valid_vm
+        - sync_options.sync_ip_addresses
+        - vm_ip_addresses is defined
+        - vm_ip_addresses | length > 0
+        - vm_sync_result is succeeded
+      register: ip_result
+      ignore_errors: true
+
+    # 🏷️ Criar tags
+    - name: "🏷️ Criar tags para {{ vm_name }}"
+      netbox.netbox.netbox_tag:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ item }}"
+          slug: "{{ item | lower | regex_replace('[^a-z0-9-]', '-') }}"
+          color: "{{ tag_colors[item] | default('9e9e9e') }}"
+        state: present
+        validate_certs: false
+      loop:
+        - "env-{{ vm_environment | default('unknown') }}"
+        - "criticality-{{ vm_criticality | default('low') }}"
+        - "awx-managed"
+        - "vmware-vm"
+      vars:
+        tag_colors:
+          env-production: "f44336"
+          env-development: "4caf50"
+          env-testing: "ff9800"
+          env-unknown: "9e9e9e"
+          criticality-high: "f44336"
+          criticality-medium: "ff9800"
+          criticality-low: "4caf50"
+          awx-managed: "2196f3"
+          vmware-vm: "607d8b"
+      when: 
+        - is_valid_vm
+        - sync_options.add_tags
+        - vm_sync_result is succeeded
+      ignore_errors: true
+
+    # 🏷️ Aplicar tags na VM
+    - name: "🏷️ Aplicar tags na VM {{ vm_name }}"
+      netbox.netbox.netbox_virtual_machine:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_name | regex_replace('[\"''\\\\]', '') }}"
+          tags:
+            - "env-{{ vm_environment | default('unknown') }}"
+            - "criticality-{{ vm_criticality | default('low') }}"
+            - "awx-managed"
+            - "vmware-vm"
+        state: present
+        validate_certs: false
+      when: 
+        - is_valid_vm
+        - sync_options.add_tags
+        - vm_sync_result is succeeded
+      ignore_errors: true
+
+    # ✅ Resultado da sincronização
+    - name: "✅ Resultado da sincronização para {{ vm_name }}"
+      debug:
+        msg:
+          - "🖥️  VM: {{ vm_name }}"
+          - "{{ '✅ Sincronizado com sucesso' if vm_sync_result is succeeded else '❌ Falha na sincronização' }}"
+          - "{{ '🌐 IP criado' if ip_result is succeeded else '❌ Falha no IP' }}"
+          - "{{ '🔌 Interface criada' if interface_result is succeeded else '❌ Falha na interface' }}"
+      when: 
+        - is_valid_vm
+        - sync_options.enable_debug
+
+# 📊 Relatório final
+- name: 📊 Relatório Final do Job Template
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+  tasks:
+    - name: 📈 Gerar estatísticas finais
+      set_fact:
+        final_stats:
+          total_hosts: "{{ groups['all'] | length }}"
+          valid_vms: "{{ groups['all'] | length - (ansible_play_hosts_all | default([]) | length) }}"
+          job_duration: "{{ ansible_date_time.epoch | int - (hostvars[groups['all'][0]].job_stats.start_time | default(ansible_date_time.epoch)) | int }}"
+          completion_time: "{{ ansible_date_time.iso8601 }}"
+          awx_job_id: "{{ awx_job_id | default('N/A') }}"
+          awx_job_template: "{{ awx_job_template_name | default('N/A') }}"
+
+    - name: 🚀 Exibir relatório final
+      debug:
+        msg:
+          - "╔══════════════════════════════════════════════════════════════════╗"
+          - "║                  🎯 AWX Job Template - Concluído                ║"
+          - "╠══════════════════════════════════════════════════════════════════╣"
+          - "║ 📊 Total de Hosts: {{ final_stats.total_hosts }}                ║"
+          - "║ ✅ VMs Válidas: {{ final_stats.valid_vms }}                      ║"
+          - "║ ⏱️  Duração: {{ final_stats.job_duration }}s                    ║"
+          - "║ 🕐 Concluído em: {{ final_stats.completion_time }}              ║"
+          - "║ 🆔 Job ID: {{ final_stats.awx_job_id }}                         ║"
+          - "║ 📋 Template: {{ final_stats.awx_job_template }}                 ║"
+          - "╚══════════════════════════════════════════════════════════════════╝"
+
+    - name: 📝 Salvar relatório do job
+      copy:
+        content: |
+          {
+            "awx_job_report": {
+              "job_id": "{{ final_stats.awx_job_id }}",
+              "job_template": "{{ final_stats.awx_job_template }}",
+              "completion_time": "{{ final_stats.completion_time }}",
+              "duration_seconds": {{ final_stats.job_duration }},
+              "statistics": {
+                "total_hosts": {{ final_stats.total_hosts }},
+                "valid_vms": {{ final_stats.valid_vms }}
+              },
+              "configuration": {
+                "netbox_url": "{{ netbox_url }}",
+                "tenant": "{{ tenant_name }}",
+                "site": "{{ datacenter_name }}",
+                "vm_role": "{{ vm_role }}"
+              }
+            }
+          }
+        dest: "/tmp/awx_job_{{ final_stats.awx_job_id }}_netbox_sync.json"
+      when: final_stats.awx_job_id != 'N/A'

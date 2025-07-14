@@ -1,5 +1,5 @@
 ---
-- name: 🚀 Sincronizar VMs do AWX para o NetBox (Corrigido)
+- name: Sincronizar VMs do AWX para o NetBox
   hosts: all
   gather_facts: false
   vars:
@@ -8,25 +8,16 @@
     netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') | default('') }}"
 
   tasks:
-    # 🔍 Validação inicial
-    - name: 🔍 Validar configuração
+    - name: Validar configuração
       fail:
         msg: |
-          ❌ Configuração inválida:
+          Configuração inválida:
           NetBox URL: {{ 'OK' if netbox_url != '' else 'FALTANDO' }}
           NetBox Token: {{ 'OK' if netbox_token != '' else 'FALTANDO' }}
           VM Name: {{ 'OK' if vm_name is defined else 'FALTANDO' }}
+      when: netbox_url == '' or netbox_token == '' or vm_name is not defined or vm_name == ''
 
-          Configure as variáveis NETBOX_API e NETBOX_TOKEN
-      when: >
-        netbox_url == '' or 
-        netbox_token == '' or 
-        vm_name is not defined or
-        vm_name == ''
-      run_once: true
-
-    # 🔍 Verificar se é uma VM válida
-    - name: 🔍 Verificar se é uma VM válida
+    - name: Verificar se é uma VM válida
       set_fact:
         is_valid_vm: >-
           {{
@@ -37,22 +28,11 @@
             vm_name != ''
           }}
 
-    # ⏭️ Pular VMs inválidas
-    - name: ⏭️ Pular VM inválida
+    - name: Pular VM inválida
       meta: end_host
       when: not is_valid_vm
 
-    # 📊 Debug da VM atual
-    - name: 📊 Processar VM {{ vm_name }}
-      debug:
-        msg:
-          - "🖥️  VM: {{ vm_name }}"
-          - "⚡ Estado: {{ vm_power_state | default('N/A') }}"
-          - "🏢 Cluster: {{ vm_cluster | default('N/A') }}"
-          - "🏗️  Datacenter: {{ vm_datacenter | default('N/A') }}"
-
-    # 🧪 Teste conectividade NetBox
-    - name: 🧪 Testar conectividade NetBox
+    - name: Testar conectividade NetBox
       uri:
         url: "{{ netbox_url }}/api/status/"
         method: GET
@@ -63,9 +43,15 @@
       register: netbox_status
       run_once: true
       delegate_to: localhost
+      failed_when: false
 
-    # 🏗️ Criar site se necessário
-    - name: 🏗️ Verificar/Criar site no NetBox
+    - name: Falhar se NetBox inacessível
+      fail:
+        msg: "NetBox inacessível: {{ netbox_status.msg | default('Erro desconhecido') }}"
+      run_once: true
+      when: netbox_status.status != 200
+
+    - name: Verificar/Criar site no NetBox
       uri:
         url: "{{ netbox_url }}/api/dcim/sites/"
         method: POST
@@ -77,26 +63,28 @@
           name: "{{ vm_datacenter | default('Default-Site') }}"
           slug: "{{ (vm_datacenter | default('default-site')) | lower | replace('_', '-') }}"
           status: "active"
-        status_code: [200, 201, 400] # 400 = já existe
+        status_code: [200, 201, 400]
+        validate_certs: false
       register: site_result
       run_once: true
       delegate_to: localhost
       when: vm_datacenter is defined
+      failed_when: false
 
-    # 🔍 Obter ID do site
-    - name: 🔍 Obter ID do site
+    - name: Obter ID do site
       uri:
         url: "{{ netbox_url }}/api/dcim/sites/?name={{ vm_datacenter | default('Default-Site') }}"
         method: GET
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
+        validate_certs: false
       register: site_response
       delegate_to: localhost
       when: vm_datacenter is defined
+      failed_when: false
 
-    # 📍 Definir site_id
-    - name: 📍 Definir site_id
+    - name: Definir site_id
       set_fact:
         site_id: "{{ (site_response.json.results | first).id if site_response.json.results else none }}"
       when:
@@ -104,8 +92,7 @@
         - site_response is defined
         - site_response.json.results | length > 0
 
-    # 🏢 Criar cluster type se necessário
-    - name: 🏢 Criar cluster type VMware
+    - name: Criar cluster type VMware
       uri:
         url: "{{ netbox_url }}/api/virtualization/cluster-types/"
         method: POST
@@ -117,12 +104,13 @@
           name: "VMware vSphere"
           slug: "vmware-vsphere"
         status_code: [200, 201, 400]
+        validate_certs: false
       register: cluster_type_result
       run_once: true
       delegate_to: localhost
+      failed_when: false
 
-    # 🔍 Obter cluster type ID
-    - name: 🔍 Obter cluster type ID
+    - name: Obter cluster type ID
       uri:
         url: "{{ netbox_url }}/api/virtualization/cluster-types/?slug=vmware-vsphere"
         method: GET
@@ -133,8 +121,7 @@
       run_once: true
       delegate_to: localhost
 
-    # 🏢 Criar cluster se necessário
-    - name: 🏢 Verificar/Criar cluster no NetBox
+    - name: Verificar/Criar cluster no NetBox
       uri:
         url: "{{ netbox_url }}/api/virtualization/clusters/"
         method: POST
@@ -147,14 +134,14 @@
           type: "{{ (cluster_type_response.json.results | first).id }}"
           site: "{{ site_id | default(omit) }}"
         status_code: [200, 201, 400]
+        validate_certs: false
       register: cluster_result
       delegate_to: localhost
       when:
         - vm_cluster is defined
         - cluster_type_response.json.results | length > 0
 
-    # 🔍 Obter ID do cluster
-    - name: 🔍 Obter ID do cluster
+    - name: Obter ID do cluster
       uri:
         url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ vm_cluster | default('Default-Cluster') }}"
         method: GET
@@ -165,8 +152,7 @@
       delegate_to: localhost
       when: vm_cluster is defined
 
-    # 📍 Definir cluster_id
-    - name: 📍 Definir cluster_id
+    - name: Definir cluster_id
       set_fact:
         cluster_id: "{{ (cluster_response.json.results | first).id if cluster_response.json.results else none }}"
       when:
@@ -174,8 +160,7 @@
         - cluster_response is defined
         - cluster_response.json.results | length > 0
 
-    # 🔍 Verificar se a VM já existe
-    - name: 🔍 Verificar se VM {{ vm_name }} já existe
+    - name: Verificar se VM {{ vm_name }} já existe
       uri:
         url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ vm_name }}"
         method: GET
@@ -185,30 +170,28 @@
       register: vm_check_response
       delegate_to: localhost
 
-    # 📍 Definir vm_id se existir
-    - name: 📍 Definir vm_id se existir
+    - name: Definir vm_id se existir
       set_fact:
         vm_id: "{{ (vm_check_response.json.results | first).id if vm_check_response.json.results else none }}"
 
-    # 🖥️ Montar payload da VM
-    - name: 🖥️ Montar payload da VM
+    - name: Montar payload da VM
       set_fact:
         vm_payload:
           name: "{{ vm_name }}"
           status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
+          site: "{{ site_id | default(omit) }}"
           cluster: "{{ cluster_id | default(omit) }}"
           vcpus: "{{ vm_cpu_count | default(1) | int }}"
           memory: "{{ vm_memory_mb | default(1024) | int }}"
-          comments: |
-            Sincronizado via AWX
-            Host: {{ inventory_hostname }}
-            Data: {{ ansible_date_time.iso8601 }}
-            UUID: {{ vm_uuid | default('N/A') }}
-            Environment: {{ vm_environment | default('unknown') }}
-            Criticality: {{ vm_criticality | default('low') }}
+          disk: 100
+        comments: |
+          Sincronizado via AWX
+          Host: {{ inventory_hostname }}
+          UUID: {{ vm_uuid | default('N/A') }}
+          Ambiente: {{ vm_environment | default('unknown') }}
+          Criticidade: {{ vm_criticality | default('low') }}
 
-    # 💾 Criar ou atualizar VM no NetBox
-    - name: "💾 {{ 'Atualizar' if vm_id else 'Criar' }} VM {{ vm_name }} no NetBox"
+    - name: Criar ou atualizar VM no NetBox
       uri:
         url: >-
           {{ netbox_url }}/api/virtualization/virtual-machines/
@@ -224,11 +207,10 @@
       register: vm_result
       delegate_to: localhost
 
-    # ✅ Resultado
-    - name: "✅ Resultado para VM {{ vm_name }}"
+    - name: Resultado para VM {{ vm_name }}
       debug:
         msg:
-          - "🖥️  VM: {{ vm_name }}"
-          - "📊 Status: {{ vm_result.status }}"
-          - "{{ '✅ CRIADA' if vm_result.status == 201 else '✅ ATUALIZADA' if vm_result.status == 200 else '❌ ERRO' }}"
-          - "💾 NetBox ID: {{ vm_result.json.id }}"
+          - "VM: {{ vm_name }}"
+          - "Status HTTP: {{ vm_result.status }}"
+          - "{{ 'CRIADA' if vm_result.status == 201 else 'ATUALIZADA' if vm_result.status == 200 else 'ERRO' }}"
+          - "NetBox ID: {{ vm_result.json.id }}"

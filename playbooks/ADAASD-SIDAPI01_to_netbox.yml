@@ -1,0 +1,180 @@
+- name: Sincronizar VM ADAASD-SIDAPI01 no NetBox
+  hosts: ADAASD-SIDAPI01
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    netbox_url: "{{ lookup('env', 'NETBOX_API') | default('') }}"
+    netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') | default('') }}"
+
+  tasks:
+    - name: Validar configuração
+      fail:
+        msg: |
+          Configuração inválida:
+          NetBox URL: {{ 'OK' if netbox_url != '' else 'FALTANDO' }}
+          NetBox Token: {{ 'OK' if netbox_token != '' else 'FALTANDO' }}
+          VM Name: {{ 'OK' if vm_name is defined else 'FALTANDO' }}
+      when: netbox_url == '' or netbox_token == '' or vm_name is not defined or vm_name == ''
+
+    - name: Testar conectividade NetBox
+      uri:
+        url: "{{ netbox_url }}/api/status/"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        validate_certs: false
+        timeout: 10
+      register: netbox_status
+      run_once: true
+      delegate_to: localhost
+      failed_when: false
+
+    - name: Falhar se NetBox inacessível
+      fail:
+        msg: "NetBox inacessível: {{ netbox_status.msg | default('Erro desconhecido') }}"
+      run_once: true
+      when: netbox_status.status != 200
+
+    - name: Garantir site no NetBox
+      uri:
+        url: "{{ netbox_url }}/api/dcim/sites/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ vm_datacenter }}"
+          slug: "{{ vm_datacenter | lower | replace('_', '-') }}"
+          status: "active"
+        status_code: [200, 201, 400]
+        validate_certs: false
+      run_once: true
+      delegate_to: localhost
+      failed_when: false
+
+    - name: Obter site_id
+      uri:
+        url: "{{ netbox_url }}/api/dcim/sites/?name={{ vm_datacenter }}"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+        validate_certs: false
+      register: site_response
+      delegate_to: localhost
+
+    - name: Definir site_id
+      set_fact:
+        site_id: "{{ (site_response.json.results | first).id if site_response.json.results else omit }}"
+
+    - name: Garantir tipo de cluster VMware
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/cluster-types/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "VMware vSphere"
+          slug: "vmware-vsphere"
+        status_code: [200, 201, 400]
+        validate_certs: false
+      run_once: true
+      delegate_to: localhost
+      failed_when: false
+
+    - name: Obter ID do tipo de cluster
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/cluster-types/?slug=vmware-vsphere"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: cluster_type_response
+      run_once: true
+      delegate_to: localhost
+
+    - name: Garantir cluster
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/clusters/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ vm_cluster }}"
+          type: "{{ (cluster_type_response.json.results | first).id }}"
+          site: "{{ site_id }}"
+        status_code: [200, 201, 400]
+        validate_certs: false
+      delegate_to: localhost
+      failed_when: false
+
+    - name: Obter ID do cluster
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ vm_cluster }}"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: cluster_response
+      delegate_to: localhost
+
+    - name: Definir cluster_id
+      set_fact:
+        cluster_id: "{{ (cluster_response.json.results | first).id if cluster_response.json.results else omit }}"
+
+    - name: Verificar se VM já existe no NetBox
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ vm_name }}"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        return_content: true
+      register: vm_check_response
+      delegate_to: localhost
+
+    - name: Definir vm_id se já existir
+      set_fact:
+        vm_id: "{{ (vm_check_response.json.results | first).id if vm_check_response.json.results else omit }}"
+
+    - name: Montar payload da VM
+      set_fact:
+        vm_payload:
+          name: "{{ vm_name }}"
+          status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
+          site: "{{ site_id }}"
+          cluster: "{{ cluster_id }}"
+          vcpus: "{{ vm_cpu_count }}"
+          memory: "{{ vm_memory_mb }}"
+          disk: 100
+          comments: |
+            Sincronizado via AWX
+            Host: {{ inventory_hostname }}
+            UUID: {{ vm_uuid }}
+            Ambiente: {{ vm_environment }}
+            Criticidade: {{ vm_criticality }}
+
+    - name: Criar ou atualizar VM no NetBox
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/{{ vm_id | default('') }}"
+        method: "{{ 'PATCH' if vm_id is defined else 'POST' }}"
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: "{{ vm_payload | to_json }}"
+        status_code: [200, 201]
+        validate_certs: false
+      register: vm_result
+      delegate_to: localhost
+
+    - name: Resultado final
+      debug:
+        msg:
+          - "VM: {{ vm_name }}"
+          - "Status: {{ vm_result.status }}"
+          - "{{ 'CRIADA' if vm_result.status == 201 else 'ATUALIZADA' if vm_result.status == 200 else 'ERRO' }}"

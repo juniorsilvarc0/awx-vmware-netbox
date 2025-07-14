@@ -1,309 +1,131 @@
 ---
-# Playbook para sincronizar VMs do inventário VMware para o NetBox
-# Arquivo: playbooks/vmware_to_netbox.yml
-
-- name: Sincronizar VMs VMware para NetBox
+- name: Sync VMware VMs from AWX Inventory to NetBox
   hosts: all
   gather_facts: false
   vars:
-    ansible_connection: local
     netbox_url: "{{ lookup('env', 'NETBOX_API') }}"
     netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') }}"
-    batch_size: 50
-    create_missing_objects: true
-    update_existing: true
-    dry_run: false
+    datacenter_name: "ATI-SLC-HCI"
 
   tasks:
-    - name: Limpar variáveis problemáticas do AWX
-      set_fact:
-        remote_host_enabled: ""
-        remote_host_id: ""
-        remote_tower_enabled: ""
-        remote_tower_id: ""
-        tower_enabled: ""
-        tower_id: ""
-        awx_enabled: ""
-        awx_id: ""
-      failed_when: false
-
-    - name: Debug - verificar limpeza de variáveis
-      debug:
-        msg: |
-          Variáveis limpas:
-          - remote_host_enabled: {{ remote_host_enabled | default('undefined') }}
-          - remote_host_id: {{ remote_host_id | default('undefined') }}
-          - remote_tower_enabled: {{ remote_tower_enabled | default('undefined') }}
-          - remote_tower_id: {{ remote_tower_id | default('undefined') }}
-      when: dry_run
-
-    - name: Pular VMs sem dados essenciais
-      meta: end_host
-      when: vm_name is undefined or vm_name == ""
-
-    - name: Preparar dados da VM
-      set_fact:
-        vm_meta:
-          name: "{{ vm_name }}"
-          uuid: "{{ vm_uuid }}"
-          vcpus: "{{ vm_cpu_count | default(1) }}"
-          memory: "{{ vm_memory_mb | default(1024) }}"
-          disk: "{{ 20 }}"
-          cluster: "{{ vm_cluster | default('default-cluster') }}"
-          datacenter: "{{ vm_datacenter | default('ATI-SLC-HCI') }}"
-          status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' if vm_power_state == 'poweredOff' else 'staged' }}"
-          interfaces: >-
-            {% set interfaces = [] %}
-            {% if vm_ip_addresses is defined and vm_ip_addresses | length > 0 %}
-              {% for ip in vm_ip_addresses %}
-                {% set interface = {
-                  'name': 'eth' + loop.index0|string,
-                  'macaddress': '00:50:56:' + '%02x:%02x:%02x'|format(
-                    range(0, 256)|random,
-                    range(0, 256)|random, 
-                    range(0, 256)|random
-                  ),
-                  'ipaddresses': [ip]
-                } %}
-                {% set _ = interfaces.append(interface) %}
-              {% endfor %}
-            {% endif %}
-            {{ interfaces }}
-
-    - name: Criar site no NetBox se necessário
+    # Criar site no NetBox se não existir
+    - name: Create NetBox Site
       netbox.netbox.netbox_site:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          name: "{{ vm_meta.datacenter }}"
-          slug: "{{ vm_meta.datacenter | lower | replace(' ', '-') | regex_replace('[^a-z0-9-]', '-') }}"
+          name: "{{ datacenter_name }}"
+          slug: "{{ datacenter_name | lower | replace('_', '-') }}"
           status: active
-          description: "Site criado automaticamente via AWX"
         state: present
       delegate_to: localhost
-      when: not dry_run
 
-    - name: Criar tipo de cluster VMware
+    # Criar cluster no NetBox se não existir
+    - name: Create NetBox Cluster Type
       netbox.netbox.netbox_cluster_type:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          name: VMware
-          slug: vmware
-          description: "VMware vSphere Clusters"
+          name: "VMware vSphere"
+          slug: "vmware-vsphere"
         state: present
       delegate_to: localhost
-      run_once: true
-      when: not dry_run
 
-    - name: Verificar se cluster existe
-      uri:
-        url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ vm_meta.cluster | urlencode }}"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        method: GET
-        return_content: yes
-        validate_certs: false
-      register: cluster_check
-      delegate_to: localhost
-      when: not dry_run
-
-    - name: Criar cluster se não existir
+    # Criar cluster no NetBox
+    - name: Create NetBox Cluster
       netbox.netbox.netbox_cluster:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          name: "{{ vm_meta.cluster }}"
-          site: "{{ vm_meta.datacenter }}"
-          cluster_type: VMware
-          description: "Cluster criado automaticamente via AWX"
+          name: "{{ vm_cluster | default('Default Cluster') }}"
+          type: "VMware vSphere"
+          site: "{{ datacenter_name }}"
         state: present
       delegate_to: localhost
-      when:
-        - not dry_run
-        - cluster_check.json.count | int == 0
+      when: vm_cluster is defined
+      run_once: true
 
-    - name: Criar/atualizar VM no NetBox
+    # Criar plataforma no NetBox
+    - name: Create NetBox Platform
+      netbox.netbox.netbox_platform:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_guest_os | default('Unknown OS') }}"
+          slug: "{{ vm_guest_os | default('unknown-os') | lower | regex_replace('[^a-z0-9-]', '-') }}"
+        state: present
+      delegate_to: localhost
+      when: vm_guest_os is defined
+      run_once: true
+
+    # Sincronizar VMs do inventário para o NetBox
+    - name: Sync VM to NetBox
       netbox.netbox.netbox_virtual_machine:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          name: "{{ vm_meta.name }}"
-          vcpus: "{{ vm_meta.vcpus | int }}"
-          memory: "{{ (vm_meta.memory | float / 1024) | round(0, 'floor') | int }}"
-          disk: "{{ vm_meta.disk | float | round(0, 'floor') | int }}"
-          cluster: "{{ vm_meta.cluster }}"
-          status: "{{ vm_meta.status }}"
-          description: |
-            VM importada automaticamente do vCenter via AWX
-            UUID: {{ vm_meta.uuid }}
-            SO: {{ vm_guest_os | default('Unknown') }}
-            Cluster: {{ vm_meta.cluster }}
-            Datacenter: {{ vm_meta.datacenter }}
-            Ambiente: {{ vm_environment | default('unknown') }}
-            Criticidade: {{ vm_criticality | default('low') }}
-            Ferramentas VMware: {{ vm_tools_status | default('unknown') }}
+          name: "{{ vm_name }}"
+          cluster: "{{ vm_cluster | default('Default Cluster') }}"
+          platform: "{{ vm_guest_os | default('Unknown OS') }}"
+          vcpus: "{{ vm_cpu_count | default(1) }}"
+          memory: "{{ vm_memory_mb | default(1024) }}"
+          status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
+          custom_fields:
+            vm_uuid: "{{ vm_uuid }}"
+            vm_folder: "{{ vm_folder | default('') }}"
+            vm_environment: "{{ vm_environment | default('unknown') }}"
+            vm_criticality: "{{ vm_criticality | default('low') }}"
+            vm_cpu_category: "{{ vm_cpu_category | default('') }}"
+            vm_memory_category: "{{ vm_memory_category | default('') }}"
+            tools_status: "{{ vm_tools_status | default('') }}"
+            guest_family: "{{ vm_guest_family | default('') }}"
         state: present
       delegate_to: localhost
-      when: not dry_run
+      when:
+        - vm_name is defined
+        - vm_name != 'localhost'
 
-    - name: Verificar se a VM possui interfaces
-      set_fact:
-        vm_interfaces_raw: "{{ vm_meta.interfaces | default([]) }}"
-
-    - name: Filtrar interfaces com IPs
-      set_fact:
-        interfaces_com_ip: >-
-          {{ vm_interfaces_raw
-             | selectattr('ipaddresses', 'defined')
-             | selectattr('ipaddresses', '!=', '')
-             | selectattr('ipaddresses', '!=', [])
-             | list }}
-
-    - name: Criar/atualizar interfaces com MAC
+    # Criar interfaces de rede para as VMs
+    - name: Create VM Network Interface
       netbox.netbox.netbox_vm_interface:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          virtual_machine: "{{ vm_meta.name }}"
-          name: "{{ iface.name }}"
+          virtual_machine: "{{ vm_name }}"
+          name: "eth0"
           enabled: true
-          mac_address: "{{ iface.macaddress }}"
-          description: "Interface criada automaticamente via AWX"
+          type: "virtual"
         state: present
-      loop: "{{ interfaces_com_ip }}"
-      loop_control:
-        loop_var: iface
-        label: "{{ iface.name }}"
       delegate_to: localhost
       when:
-        - not dry_run
-        - interfaces_com_ip | length > 0
+        - vm_name is defined
+        - vm_name != 'localhost'
+        - vm_ip_addresses is defined
 
-    - name: Criar IPs no IPAM
+    # Criar endereços IP para as VMs
+    - name: Create VM IP Address
       netbox.netbox.netbox_ip_address:
         netbox_url: "{{ netbox_url }}"
         netbox_token: "{{ netbox_token }}"
         data:
-          address: "{{ item.1 }}{{ '/128' if ':' in item.1 else '/32' }}"
+          address: "{{ vm_ip_addresses[0] }}/24"
+          assigned_object_type: "virtualization.vminterface"
+          assigned_object_id: "{{ vm_interface_result.msg.id | default(omit) }}"
+          dns_name: "{{ vm_hostname | default('') }}"
           status: active
-          description: "IP da VM {{ vm_meta.name }} criado via AWX"
         state: present
-      loop: "{{ interfaces_com_ip | subelements('ipaddresses') }}"
-      loop_control:
-        label: "{{ item.1 }}"
       delegate_to: localhost
       when:
-        - not dry_run
-        - interfaces_com_ip | length > 0
+        - vm_name is defined
+        - vm_name != 'localhost'
+        - vm_ip_addresses is defined
 
-    - name: Obter interfaces da VM no NetBox
-      uri:
-        url: "{{ netbox_url }}/api/virtualization/interfaces/?virtual_machine={{ vm_meta.name }}"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        method: GET
-        return_content: yes
-        validate_certs: false
-      register: vm_interfaces
-      delegate_to: localhost
-      when:
-        - not dry_run
-        - interfaces_com_ip | length > 0
-
-    - name: Obter IDs de IPs existentes
-      uri:
-        url: "{{ netbox_url }}/api/ipam/ip-addresses/?address={{ item.1 }}{{ '/128' if ':' in item.1 else '/32' }}"
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-        method: GET
-        return_content: yes
-        validate_certs: false
-      register: ip_query
-      loop: "{{ interfaces_com_ip | subelements('ipaddresses') }}"
-      loop_control:
-        label: "{{ item.1 }}"
-      retries: 3
-      delay: 2
-      until: ip_query.status == 200
-      delegate_to: localhost
-      when:
-        - not dry_run
-        - interfaces_com_ip | length > 0
-
-    - name: Montar mapeamento IP ↔ interface
-      set_fact:
-        ip_interface_map: "{{ ip_interface_map | default([]) + [ new_map ] }}"
-      vars:
-        iface_name: "{{ item.0.0.name }}"
-        ip_id: >-
-          {{ (item.1.json.results[0].id if (item.1 is defined and 
-                                           item.1.json is defined and 
-                                           item.1.json.results is defined and 
-                                           item.1.json.results | length > 0) 
-              else omit) }}
-        iface_id: >-
-          {{ (vm_interfaces.json.results
-             | selectattr('name', 'equalto', iface_name)
-             | map(attribute='id')
-             | first) if (vm_interfaces.json is defined and 
-                         vm_interfaces.json.results is defined) 
-             else omit }}
-        new_map:
-          ip_id: "{{ ip_id }}"
-          iface_id: "{{ iface_id }}"
-      loop: "{{ query('subelements', interfaces_com_ip, 'ipaddresses') | zip(ip_query.results) | list }}"
-      loop_control:
-        label: "{{ item.0.1 }}"
-      when:
-        - not dry_run
-        - interfaces_com_ip | length > 0
-        - ip_id is defined and ip_id != omit
-        - iface_id is defined and iface_id != omit
-
-    - name: Associar IPs às interfaces
-      uri:
-        url: "{{ netbox_url }}/api/ipam/ip-addresses/{{ item.ip_id }}/"
-        method: PATCH
-        headers:
-          Authorization: "Token {{ netbox_token }}"
-          Content-Type: application/json
-        body_format: json
-        body:
-          assigned_object_type: virtualization.vminterface
-          assigned_object_id: "{{ item.iface_id }}"
-        status_code: [200, 204]
-      loop: "{{ ip_interface_map }}"
-      loop_control:
-        label: "IP {{ item.ip_id }} → Interface {{ item.iface_id }}"
-      delegate_to: localhost
-      when:
-        - not dry_run
-        - ip_interface_map is defined
-
-- name: Relatório Final de Sincronização
-  hosts: localhost
-  gather_facts: false
-  vars:
-    ansible_connection: local
-  run_once: true
-
-  tasks:
-    - name: Gerar estatísticas finais
+    # Relatório de sincronização
+    - name: Generate sync report
       debug:
-        msg: |
-
-          RELATÓRIO DE SINCRONIZAÇÃO
-          ---------------------------
-          Total de VMs processadas: {{ ansible_play_hosts | length }}
-          NetBox URL: {{ netbox_url }}
-          Modo: {{ 'DRY RUN (simulação)' if dry_run else 'PRODUÇÃO (real)' }}
-          Executado em: {{ ansible_date_time.iso8601 }}
-
-          Para executar em modo de produção:
-             Desmarque a variável 'dry_run' ou defina como false
-
-          Para customizar:
-             - batch_size: Tamanho do lote de processamento
-             - update_existing: Atualizar VMs existentes
-             - create_missing_objects: Criar objetos faltantes
+        msg:
+          - "Synchronization completed!"
+          - "VM processed: {{ vm_name | default('N/A') }}"
+          - "NetBox URL: {{ netbox_url }}"
+          - "Datacenter: {{ datacenter_name }}"
+      delegate_to: localhost

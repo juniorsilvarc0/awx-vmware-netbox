@@ -1,0 +1,237 @@
+---
+- name: 🔍 DEBUG - AWX NetBox Sync Troubleshooting
+  hosts: localhost
+  gather_facts: true
+  vars:
+    ansible_connection: local
+  
+  tasks:
+    - name: 🔍 DEBUG - Mostrar todas as variáveis de ambiente
+      debug:
+        msg:
+          - "=========================================="
+          - "📊 INFORMAÇÕES DO AMBIENTE AWX"
+          - "=========================================="
+          - "🔧 AWX Job ID: {{ tower_job_id | default('N/A') }}"
+          - "📋 Job Template: {{ tower_job_template_name | default('N/A') }}"
+          - "👤 Usuário: {{ tower_user_name | default('N/A') }}"
+          - "📦 Projeto: {{ tower_project_name | default('N/A') }}"
+          - "🗂️  Inventário: {{ tower_inventory_name | default('N/A') }}"
+          - "🔗 AWX Host: {{ tower_host | default('N/A') }}"
+          - "=========================================="
+
+    - name: 🔍 DEBUG - Verificar variáveis NetBox
+      debug:
+        msg:
+          - "=========================================="
+          - "🌐 CONFIGURAÇÕES NETBOX"
+          - "=========================================="
+          - "🔗 NetBox URL definida: {{ netbox_api_url is defined }}"
+          - "🔗 NetBox URL: {{ netbox_api_url | default('NÃO DEFINIDA') }}"
+          - "🔑 NetBox Token definido: {{ netbox_api_token is defined }}"
+          - "🔑 NetBox Token (primeiros 10 chars): {{ netbox_api_token[:10] if netbox_api_token is defined else 'NÃO DEFINIDO' }}"
+          - "=========================================="
+
+    - name: 🔍 DEBUG - Verificar variáveis extras
+      debug:
+        msg:
+          - "=========================================="
+          - "⚙️  EXTRA VARIABLES"
+          - "=========================================="
+          - "🏢 Datacenter: {{ awx_netbox_datacenter | default('ATI-SLC-HCI') }}"
+          - "🏙️  Tenant: {{ awx_netbox_tenant | default('ATI') }}"
+          - "👤 VM Role: {{ awx_netbox_vm_role | default('server') }}"
+          - "🌐 Subnet: {{ awx_netbox_subnet | default('24') }}"
+          - "🔧 Debug habilitado: {{ awx_netbox_debug | default(false) }}"
+          - "=========================================="
+
+    - name: 🔍 DEBUG - Verificar inventário
+      debug:
+        msg:
+          - "=========================================="
+          - "📋 INFORMAÇÕES DO INVENTÁRIO"
+          - "=========================================="
+          - "📊 Total de grupos: {{ groups | length }}"
+          - "📊 Grupos disponíveis: {{ groups.keys() | list }}"
+          - "📊 Total hosts em 'all': {{ groups['all'] | length if 'all' in groups else 0 }}"
+          - "🖥️  Primeiros 5 hosts: {{ groups['all'][:5] if 'all' in groups and groups['all'] | length > 0 else 'Nenhum host encontrado' }}"
+          - "=========================================="
+
+    - name: 🔍 DEBUG - Verificar collections instaladas
+      shell: |
+        ansible-galaxy collection list | grep -E "(netbox|community.vmware)" || echo "Collections não encontradas"
+      register: collections_check
+      ignore_errors: true
+
+    - name: 🔍 DEBUG - Mostrar collections
+      debug:
+        msg:
+          - "=========================================="
+          - "📦 ANSIBLE COLLECTIONS"
+          - "=========================================="
+          - "{{ collections_check.stdout_lines }}"
+          - "=========================================="
+
+    - name: 🔍 DEBUG - Teste de conectividade (se credenciais estão definidas)
+      uri:
+        url: "{{ netbox_api_url }}/api/status/"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_api_token }}"
+        validate_certs: false
+        timeout: 10
+      register: netbox_status
+      when: 
+        - netbox_api_url is defined
+        - netbox_api_token is defined
+        - netbox_api_url != ''
+        - netbox_api_token != ''
+      ignore_errors: true
+
+    - name: 🔍 DEBUG - Resultado do teste NetBox
+      debug:
+        msg:
+          - "=========================================="
+          - "🌐 TESTE DE CONECTIVIDADE NETBOX"
+          - "=========================================="
+          - "✅ Status: {{ netbox_status.status | default('Não testado - credenciais faltando') }}"
+          - "📄 Resposta: {{ netbox_status.json | default('N/A') }}"
+          - "❌ Erro: {{ netbox_status.msg | default('Nenhum') }}"
+          - "=========================================="
+
+    - name: 🔍 DEBUG - Verificar arquivo requirements.yml
+      stat:
+        path: "{{ playbook_dir }}/../requirements.yml"
+      register: requirements_file
+
+    - name: 🔍 DEBUG - Mostrar requirements.yml
+      debug:
+        msg:
+          - "=========================================="
+          - "📋 REQUIREMENTS.YML"
+          - "=========================================="
+          - "📁 Arquivo existe: {{ requirements_file.stat.exists }}"
+          - "📍 Caminho: {{ playbook_dir }}/../requirements.yml"
+          - "=========================================="
+
+    - name: 🔍 DEBUG - Verificar versão do Ansible
+      shell: ansible --version
+      register: ansible_version
+
+    - name: 🔍 DEBUG - Informações do sistema
+      debug:
+        msg:
+          - "=========================================="
+          - "🖥️  INFORMAÇÕES DO SISTEMA"
+          - "=========================================="
+          - "🐍 Python: {{ ansible_python_interpreter | default(ansible_python.executable) }}"
+          - "📦 Ansible: {{ ansible_version.stdout_lines[0] }}"
+          - "🗂️  Playbook Dir: {{ playbook_dir }}"
+          - "🏠 Home Dir: {{ ansible_env.HOME | default('N/A') }}"
+          - "👤 User: {{ ansible_env.USER | default('N/A') }}"
+          - "=========================================="
+
+    - name: 🔍 DEBUG - Verificar se existem VMs válidas no inventário
+      debug:
+        msg:
+          - "=========================================="
+          - "🖥️  ANÁLISE DO INVENTÁRIO DE VMS"
+          - "=========================================="
+          - "📊 Verificando hostvars..."
+      delegate_to: localhost
+
+- name: 🔍 DEBUG - Verificar hosts individuais (amostra)
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_connection: local
+  serial: 5  # Processa apenas 5 hosts para debug
+  
+  tasks:
+    - name: 🔍 DEBUG - Informações do host atual
+      debug:
+        msg:
+          - "=========================================="
+          - "🖥️  HOST: {{ inventory_hostname }}"
+          - "=========================================="
+          - "📛 vm_name: {{ vm_name | default('NÃO DEFINIDO') }}"
+          - "⚡ vm_power_state: {{ vm_power_state | default('NÃO DEFINIDO') }}"
+          - "🌐 vm_ip_addresses: {{ vm_ip_addresses | default('NÃO DEFINIDO') }}"
+          - "💻 vm_guest_os: {{ vm_guest_os | default('NÃO DEFINIDO') }}"
+          - "🏢 vm_cluster: {{ vm_cluster | default('NÃO DEFINIDO') }}"
+          - "📊 vm_cpu_count: {{ vm_cpu_count | default('NÃO DEFINIDO') }}"
+          - "🧠 vm_memory_mb: {{ vm_memory_mb | default('NÃO DEFINIDO') }}"
+          - "🏷️  vm_environment: {{ vm_environment | default('NÃO DEFINIDO') }}"
+          - "🔴 vm_criticality: {{ vm_criticality | default('NÃO DEFINIDO') }}"
+          - "✅ É VM válida: {{ vm_name is defined and vm_name != 'localhost' and vm_name != inventory_hostname and vm_name != 'N/A' and vm_name != '' }}"
+          - "=========================================="
+      when: ansible_play_hosts.index(inventory_hostname) < 5  # Apenas primeiros 5 hosts
+
+- name: 🔍 DEBUG - Resumo Final
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    
+  tasks:
+    - name: 🔍 DEBUG - Resumo da análise
+      debug:
+        msg:
+          - "╔══════════════════════════════════════════════════════════════════╗"
+          - "║                    🔍 RESUMO DO DEBUG                           ║"
+          - "╠══════════════════════════════════════════════════════════════════╣"
+          - "║ 1. Verifique se as credenciais NetBox estão configuradas        ║"
+          - "║ 2. Confirme que o inventário VMware está populado               ║"
+          - "║ 3. Verifique se as collections estão instaladas                 ║"
+          - "║ 4. Confirme conectividade com NetBox                            ║"
+          - "║                                                                  ║"
+          - "║ 📋 Próximos passos baseados nos resultados acima:               ║"
+          - "║ - Se credenciais faltam: Configure Custom Credential Type       ║"
+          - "║ - Se inventory vazio: Verifique fonte VMware                    ║"
+          - "║ - Se collections faltam: requirements.yml será processado       ║"
+          - "║ - Se NetBox inacessível: Verifique URL e token                  ║"
+          - "╚══════════════════════════════════════════════════════════════════╝"
+
+    - name: 📝 DEBUG - Gerar arquivo de diagnóstico
+      copy:
+        content: |
+          DIAGNÓSTICO AWX → NetBox Sync
+          ==============================
+          
+          Data/Hora: {{ ansible_date_time.iso8601 }}
+          AWX Job ID: {{ tower_job_id | default('N/A') }}
+          Job Template: {{ tower_job_template_name | default('N/A') }}
+          
+          CREDENCIAIS:
+          - NetBox URL definida: {{ netbox_api_url is defined }}
+          - NetBox Token definido: {{ netbox_api_token is defined }}
+          
+          INVENTÁRIO:
+          - Total de hosts: {{ groups['all'] | length if 'all' in groups else 0 }}
+          - Grupos disponíveis: {{ groups.keys() | join(', ') }}
+          
+          VARIÁVEIS EXTRAS:
+          - Datacenter: {{ awx_netbox_datacenter | default('ATI-SLC-HCI') }}
+          - Tenant: {{ awx_netbox_tenant | default('ATI') }}
+          - VM Role: {{ awx_netbox_vm_role | default('server') }}
+          - Debug: {{ awx_netbox_debug | default(false) }}
+          
+          STATUS NETBOX:
+          - Conectividade: {{ 'OK' if netbox_status is defined and netbox_status.status == 200 else 'FALHOU' }}
+          - Status Code: {{ netbox_status.status | default('N/A') }}
+          
+          RECOMENDAÇÕES:
+          {% if not (netbox_api_url is defined and netbox_api_token is defined) %}
+          ⚠️  CRÍTICO: Credenciais NetBox não configuradas
+             - Crie Custom Credential Type "NetBox API" 
+             - Adicione credencial ao Job Template
+          {% endif %}
+          
+          {% if groups['all'] | length == 0 %}
+          ⚠️  CRÍTICO: Inventário vazio
+             - Verifique fonte de inventário VMware
+             - Confirme que dynamic inventory está funcionando
+          {% endif %}
+          
+        dest: /tmp/awx_netbox_debug_{{ tower_job_id | default('manual') }}.txt
+      ignore_errors: true

@@ -1,0 +1,349 @@
+---
+- name: 🚀 AWX → NetBox Sync (Versão Simplificada)
+  hosts: all
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    
+    # Configurações NetBox - usando variáveis de credential ou env
+    netbox_url: "{{ netbox_api_url | default(lookup('env', 'NETBOX_API') | default('http://177.93.133.239:8000')) }}"
+    netbox_token: "{{ netbox_api_token | default(lookup('env', 'NETBOX_TOKEN') | default('')) }}"
+    
+    # Configurações padrão
+    datacenter_name: "{{ awx_netbox_datacenter | default('ATI-SLC-HCI') }}"
+    tenant_name: "{{ awx_netbox_tenant | default('ATI') }}"
+    vm_role: "{{ awx_netbox_vm_role | default('server') }}"
+    default_ip_subnet: "{{ awx_netbox_subnet | default('24') }}"
+    enable_debug: "{{ awx_netbox_debug | default(true) }}"
+    
+    # Controle de execução
+    max_vms_to_process: "{{ awx_netbox_max_vms | default(10) }}"  # Limite para teste
+    
+    # Estatísticas
+    processed_count: 0
+    success_count: 0
+    failed_count: 0
+
+  tasks:
+    # 🎯 Header de inicialização
+    - name: 🎯 Inicializar sincronização AWX → NetBox
+      debug:
+        msg:
+          - "╔══════════════════════════════════════════════════════════════════╗"
+          - "║              🚀 AWX → NetBox Sync (Versão Simples)              ║"
+          - "╠══════════════════════════════════════════════════════════════════╣"
+          - "║ 🕐 Início: {{ ansible_date_time.iso8601 }}                      ║"
+          - "║ 🏢 Tenant: {{ tenant_name }}                                    ║"
+          - "║ 🏗️  Site: {{ datacenter_name }}                                ║"
+          - "║ 🎯 NetBox: {{ netbox_url }}                                     ║"
+          - "║ 📊 Host atual: {{ inventory_hostname }}                         ║"
+          - "║ 🔧 Debug: {{ enable_debug }}                                    ║"
+          - "║ 🔢 Limite VMs: {{ max_vms_to_process }}                         ║"
+          - "╚══════════════════════════════════════════════════════════════════╝"
+      run_once: true
+
+    # 🔍 Verificar configuração básica
+    - name: 🔍 Verificar configuração
+      debug:
+        msg:
+          - "⚙️  Verificando configuração..."
+          - "🔗 NetBox URL: {{ 'CONFIGURADA' if netbox_url != '' else '❌ FALTANDO' }}"
+          - "🔑 NetBox Token: {{ 'CONFIGURADO' if netbox_token != '' else '❌ FALTANDO' }}"
+          - "📋 Inventory Host: {{ inventory_hostname }}"
+          - "🖥️  VM Name: {{ vm_name | default('❌ NÃO DEFINIDO') }}"
+      when: enable_debug
+      run_once: true
+
+    # ⚠️ Validação crítica
+    - name: ⚠️ Validar configuração crítica
+      fail:
+        msg: |
+          ❌ CONFIGURAÇÃO INVÁLIDA:
+          
+          NetBox URL: {{ netbox_url }}
+          NetBox Token: {{ 'DEFINIDO' if netbox_token != '' else 'FALTANDO' }}
+          
+          SOLUÇÕES:
+          1. Configure Custom Credential Type "NetBox API" no AWX
+          2. Adicione as credenciais no Job Template
+          3. OU configure as variáveis NETBOX_API e NETBOX_TOKEN
+      when: netbox_url == '' or netbox_token == ''
+      run_once: true
+
+    # 🔍 Verificar se é uma VM válida
+    - name: 🔍 Verificar se é uma VM válida
+      set_fact:
+        is_valid_vm: >-
+          {{
+            vm_name is defined and 
+            vm_name != 'localhost' and 
+            vm_name != inventory_hostname and 
+            vm_name != 'N/A' and 
+            vm_name != '' and
+            vm_name is not none
+          }}
+
+    # 📊 Debug das informações da VM
+    - name: 📊 Debug - Informações da VM
+      debug:
+        msg:
+          - "🖥️  Host: {{ inventory_hostname }}"
+          - "📛 VM Name: {{ vm_name | default('NÃO DEFINIDO') }}"
+          - "✅ É válida: {{ is_valid_vm }}"
+          - "⚡ Power State: {{ vm_power_state | default('N/A') }}"
+          - "🌐 IPs: {{ vm_ip_addresses | default([]) | join(', ') }}"
+          - "💻 OS: {{ vm_guest_os | default('N/A') }}"
+          - "🏢 Cluster: {{ vm_cluster | default('N/A') }}"
+          - "📊 CPUs: {{ vm_cpu_count | default('N/A') }}"
+          - "🧠 Memory: {{ vm_memory_mb | default('N/A') }}MB"
+      when: 
+        - enable_debug
+        - ansible_play_hosts.index(inventory_hostname) < 5  # Apenas primeiros 5 para debug
+
+    # ⏭️ Pular VMs inválidas
+    - name: ⏭️ Pular VM inválida
+      meta: end_host
+      when: not is_valid_vm
+
+    # 📊 Contar VM válida
+    - name: 📊 Incrementar contador
+      set_fact:
+        processed_count: "{{ processed_count | int + 1 }}"
+
+    # 🛑 Limitar processamento para teste
+    - name: 🛑 Limitar processamento para teste
+      meta: end_host
+      when: processed_count | int > max_vms_to_process | int
+
+    # 🧪 Teste de conectividade NetBox (apenas uma vez)
+    - name: 🧪 Testar conectividade NetBox
+      uri:
+        url: "{{ netbox_url }}/api/status/"
+        method: GET
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+        validate_certs: false
+        timeout: 10
+        status_code: 200
+      register: netbox_connectivity
+      run_once: true
+      delegate_to: localhost
+      ignore_errors: true
+
+    # 📊 Resultado do teste
+    - name: 📊 Resultado do teste NetBox
+      debug:
+        msg:
+          - "🌐 Teste de conectividade NetBox:"
+          - "{{ '✅ SUCESSO' if netbox_connectivity.status == 200 else '❌ FALHOU' }}"
+          - "📊 Status: {{ netbox_connectivity.status | default('ERRO') }}"
+          - "📄 Resposta: {{ netbox_connectivity.json.netbox_version | default('N/A') if netbox_connectivity.status == 200 else netbox_connectivity.msg | default('Erro desconhecido') }}"
+      run_once: true
+      when: enable_debug
+
+    # ⚠️ Parar se NetBox inacessível
+    - name: ⚠️ Falha na conectividade NetBox
+      fail:
+        msg: |
+          ❌ FALHA NA CONECTIVIDADE NETBOX:
+          
+          URL: {{ netbox_url }}
+          Status: {{ netbox_connectivity.status | default('ERRO') }}
+          Erro: {{ netbox_connectivity.msg | default('Timeout ou erro de rede') }}
+          
+          VERIFIQUE:
+          1. URL do NetBox está correta
+          2. Token de API está válido
+          3. NetBox está acessível da rede AWX
+          4. Firewall/proxy não está bloqueando
+      when: 
+        - netbox_connectivity.status != 200
+        - netbox_connectivity is defined
+      run_once: true
+
+    # 🏢 Criar tenant (usando módulo básico primeiro)
+    - name: 🏢 Criar tenant NetBox
+      uri:
+        url: "{{ netbox_url }}/api/tenancy/tenants/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ tenant_name }}"
+          slug: "{{ tenant_name | lower }}"
+        validate_certs: false
+        status_code: [200, 201, 400]  # 400 = já existe
+      register: tenant_result
+      run_once: true
+      delegate_to: localhost
+      ignore_errors: true
+
+    # 📊 Debug resultado tenant
+    - name: 📊 Debug - Resultado criação tenant
+      debug:
+        msg:
+          - "🏢 Criação do tenant '{{ tenant_name }}':"
+          - "📊 Status: {{ tenant_result.status }}"
+          - "{{ '✅ Criado' if tenant_result.status == 201 else '✅ Já existe' if tenant_result.status == 400 else '❌ Erro' }}"
+          - "📄 Resposta: {{ tenant_result.json.name | default('N/A') if tenant_result.status in [200, 201] else tenant_result.json.name[0] | default('Erro') if tenant_result.status == 400 else 'Erro desconhecido' }}"
+      run_once: true
+      when: enable_debug
+
+    # 🏗️ Criar site
+    - name: 🏗️ Criar site NetBox
+      uri:
+        url: "{{ netbox_url }}/api/dcim/sites/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ datacenter_name }}"
+          slug: "{{ datacenter_name | lower | replace('_', '-') }}"
+          status: "active"
+        validate_certs: false
+        status_code: [200, 201, 400]
+      register: site_result
+      run_once: true
+      delegate_to: localhost
+      ignore_errors: true
+
+    # 📊 Debug resultado site
+    - name: 📊 Debug - Resultado criação site
+      debug:
+        msg:
+          - "🏗️  Criação do site '{{ datacenter_name }}':"
+          - "📊 Status: {{ site_result.status }}"
+          - "{{ '✅ Criado' if site_result.status == 201 else '✅ Já existe' if site_result.status == 400 else '❌ Erro' }}"
+      run_once: true
+      when: enable_debug
+
+    # 💻 Tentar criar VM usando API direta
+    - name: "💻 Criar/Atualizar VM {{ vm_name }} no NetBox"
+      uri:
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/"
+        method: POST
+        headers:
+          Authorization: "Token {{ netbox_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          name: "{{ vm_name }}"
+          status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
+          vcpus: "{{ vm_cpu_count | default(1) | int }}"
+          memory: "{{ vm_memory_mb | default(1024) | int }}"
+          comments: |
+            Sincronizado via AWX Job Template
+            Host: {{ inventory_hostname }}
+            Job: {{ tower_job_id | default('N/A') }}
+            Data: {{ ansible_date_time.iso8601 }}
+            
+            Detalhes:
+            - Power State: {{ vm_power_state | default('N/A') }}
+            - Guest OS: {{ vm_guest_os | default('N/A') }}
+            - Cluster: {{ vm_cluster | default('N/A') }}
+            - IPs: {{ vm_ip_addresses | default([]) | join(', ') }}
+        validate_certs: false
+        status_code: [200, 201, 400]
+      register: vm_result
+      delegate_to: localhost
+      ignore_errors: true
+
+    # ✅ Resultado da criação da VM
+    - name: "✅ Resultado da VM {{ vm_name }}"
+      debug:
+        msg:
+          - "🖥️  VM: {{ vm_name }}"
+          - "📊 Status HTTP: {{ vm_result.status }}"
+          - "{{ '✅ CRIADA' if vm_result.status == 201 else '✅ JÁ EXISTE' if vm_result.status == 400 else '❌ ERRO' }}"
+          - "💾 ID NetBox: {{ vm_result.json.id | default('N/A') if vm_result.status == 201 else 'N/A' }}"
+          - "❌ Erro: {{ vm_result.json | default('N/A') if vm_result.status not in [200, 201] else 'Nenhum' }}"
+      when: enable_debug
+
+    # 📊 Atualizar estatísticas
+    - name: 📊 Atualizar contador de sucesso
+      set_fact:
+        success_count: "{{ success_count | int + 1 }}"
+      when: vm_result.status in [200, 201]
+
+    - name: 📊 Atualizar contador de falhas
+      set_fact:
+        failed_count: "{{ failed_count | int + 1 }}"
+      when: vm_result.status not in [200, 201]
+
+# 📊 Relatório final
+- name: 📊 Relatório Final
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    
+  tasks:
+    - name: 📈 Coletar estatísticas finais
+      set_fact:
+        total_hosts: "{{ groups['all'] | length }}"
+        final_time: "{{ ansible_date_time.iso8601 }}"
+
+    - name: 🚀 Relatório Final da Sincronização
+      debug:
+        msg:
+          - "╔══════════════════════════════════════════════════════════════════╗"
+          - "║                    📊 RELATÓRIO FINAL                           ║"
+          - "╠══════════════════════════════════════════════════════════════════╣"
+          - "║ 🕐 Concluído: {{ final_time }}                                  ║"
+          - "║ 📊 Total de hosts no inventário: {{ total_hosts }}              ║"
+          - "║ 🖥️  VMs processadas: {{ hostvars | dict2items | selectattr('value.processed_count', 'defined') | list | length }}                       ║"
+          - "║ ✅ Sucessos: {{ hostvars | dict2items | selectattr('value.success_count', 'defined') | map(attribute='value.success_count') | map('int') | sum }}                            ║"
+          - "║ ❌ Falhas: {{ hostvars | dict2items | selectattr('value.failed_count', 'defined') | map(attribute='value.failed_count') | map('int') | sum }}                             ║"
+          - "║ 🎯 NetBox: {{ netbox_url }}                                     ║"
+          - "║ 🏢 Tenant: {{ tenant_name }}                                    ║"
+          - "║ 🏗️  Site: {{ datacenter_name }}                                ║"
+          - "║                                                                  ║"
+          - "║ 💡 PRÓXIMOS PASSOS:                                             ║"
+          - "║ 1. Se funcionou: Aumente max_vms_to_process                     ║"
+          - "║ 2. Configure schedule para execução automática                  ║"
+          - "║ 3. Use playbook completo: awx_job_template_sync.yml             ║"
+          - "╚══════════════════════════════════════════════════════════════════╝"
+
+    - name: 📝 Gerar arquivo de relatório
+      copy:
+        content: |
+          AWX → NetBox Sync - Relatório de Execução
+          ==========================================
+          
+          Data/Hora: {{ final_time }}
+          AWX Job ID: {{ tower_job_id | default('N/A') }}
+          Job Template: {{ tower_job_template_name | default('N/A') }}
+          Usuário: {{ tower_user_name | default('N/A') }}
+          
+          CONFIGURAÇÃO:
+          - NetBox URL: {{ netbox_url }}
+          - Tenant: {{ tenant_name }}
+          - Site: {{ datacenter_name }}
+          - VM Role: {{ vm_role }}
+          - Debug habilitado: {{ enable_debug }}
+          - Limite de VMs: {{ max_vms_to_process }}
+          
+          RESULTADOS:
+          - Total hosts no inventário: {{ total_hosts }}
+          - VMs processadas: {{ hostvars | dict2items | selectattr('value.processed_count', 'defined') | list | length }}
+          - Sucessos: {{ hostvars | dict2items | selectattr('value.success_count', 'defined') | map(attribute='value.success_count') | map('int') | sum }}
+          - Falhas: {{ hostvars | dict2items | selectattr('value.failed_count', 'defined') | map(attribute='value.failed_count') | map('int') | sum }}
+          
+          STATUS:
+          {% if (hostvars | dict2items | selectattr('value.success_count', 'defined') | map(attribute='value.success_count') | map('int') | sum) > 0 %}
+          ✅ SUCESSO - Pelo menos uma VM foi sincronizada
+          {% else %}
+          ❌ FALHA - Nenhuma VM foi sincronizada
+          {% endif %}
+          
+          RECOMENDAÇÕES:
+          - Se funcionou com limite pequeno, aumente max_vms_to_process
+          - Configure execução programada no AWX
+          - Use o playbook completo awx_job_template_sync.yml para produção
+          
+        dest: /tmp/awx_netbox_sync_report_{{ tower_job_id | default('manual') }}.txt
+      ignore_errors: true

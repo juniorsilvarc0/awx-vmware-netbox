@@ -7,6 +7,20 @@
     netbox_token: "{{ lookup('env', 'NETBOX_TOKEN') | default('') }}"
 
   tasks:
+    - name: Debug - Mostrar variáveis iniciais
+      debug:
+        msg:
+          - "NetBox URL: {{ netbox_url }}"
+          - "NetBox Token: {{ 'DEFINIDO' if netbox_token != '' else 'VAZIO' }}"
+          - "VM Name: {{ vm_name | default('NÃO DEFINIDO') }}"
+          - "VM Datacenter: {{ vm_datacenter | default('NÃO DEFINIDO') }}"
+          - "VM Cluster: {{ vm_cluster | default('NÃO DEFINIDO') }}"
+          - "VM Power State: {{ vm_power_state | default('NÃO DEFINIDO') }}"
+          - "VM CPU Count: {{ vm_cpu_count | default('NÃO DEFINIDO') }}"
+          - "VM Memory MB: {{ vm_memory_mb | default('NÃO DEFINIDO') }}"
+          - "VM UUID: {{ vm_uuid | default('NÃO DEFINIDO') }}"
+          - "Inventory Hostname: {{ inventory_hostname }}"
+
     - name: Validar configuração
       fail:
         msg: |
@@ -14,7 +28,9 @@
           NetBox URL: {{ 'OK' if netbox_url != '' else 'FALTANDO' }}
           NetBox Token: {{ 'OK' if netbox_token != '' else 'FALTANDO' }}
           VM Name: {{ 'OK' if vm_name is defined else 'FALTANDO' }}
-      when: netbox_url == '' or netbox_token == '' or vm_name is not defined or vm_name == ''
+          VM Datacenter: {{ 'OK' if vm_datacenter is defined else 'FALTANDO' }}
+          VM Cluster: {{ 'OK' if vm_cluster is defined else 'FALTANDO' }}
+      when: netbox_url == '' or netbox_token == '' or vm_name is not defined or vm_name == '' or vm_datacenter is not defined or vm_cluster is not defined
 
     - name: Testar conectividade NetBox
       uri:
@@ -29,9 +45,16 @@
       delegate_to: localhost
       failed_when: false
 
+    - name: Debug - Status do NetBox
+      debug:
+        msg:
+          - "Status Code: {{ netbox_status.status | default('N/A') }}"
+          - "Status Message: {{ netbox_status.msg | default('N/A') }}"
+          - "Response: {{ netbox_status.json | default('N/A') }}"
+
     - name: Falhar se NetBox inacessível
       fail:
-        msg: "NetBox inacessível: {{ netbox_status.msg | default('Erro desconhecido') }}"
+        msg: "NetBox inacessível: {{ netbox_status.msg | default('Erro desconhecido') }} (Status: {{ netbox_status.status | default('N/A') }})"
       run_once: true
       when: netbox_status.status != 200
 
@@ -51,11 +74,18 @@
         validate_certs: false
       run_once: true
       delegate_to: localhost
+      register: site_creation
       failed_when: false
+
+    - name: Debug - Criação do site
+      debug:
+        msg:
+          - "Site creation status: {{ site_creation.status | default('N/A') }}"
+          - "Site creation response: {{ site_creation.json | default('N/A') }}"
 
     - name: Obter site_id
       uri:
-        url: "{{ netbox_url }}/api/dcim/sites/?name={{ vm_datacenter }}"
+        url: "{{ netbox_url }}/api/dcim/sites/?name={{ vm_datacenter | urlencode }}"
         method: GET
         headers:
           Authorization: "Token {{ netbox_token }}"
@@ -64,9 +94,18 @@
       register: site_response
       delegate_to: localhost
 
+    - name: Debug - Resposta do site
+      debug:
+        msg:
+          - "Site response: {{ site_response.json | default('N/A') }}"
+
     - name: Definir site_id
       set_fact:
         site_id: "{{ (site_response.json.results | first).id if site_response.json.results else omit }}"
+
+    - name: Debug - Site ID
+      debug:
+        msg: "Site ID: {{ site_id | default('NÃO ENCONTRADO') }}"
 
     - name: Garantir tipo de cluster VMware
       uri:
@@ -83,7 +122,14 @@
         validate_certs: false
       run_once: true
       delegate_to: localhost
+      register: cluster_type_creation
       failed_when: false
+
+    - name: Debug - Criação do tipo de cluster
+      debug:
+        msg:
+          - "Cluster type creation status: {{ cluster_type_creation.status | default('N/A') }}"
+          - "Cluster type creation response: {{ cluster_type_creation.json | default('N/A') }}"
 
     - name: Obter ID do tipo de cluster
       uri:
@@ -95,6 +141,11 @@
       register: cluster_type_response
       run_once: true
       delegate_to: localhost
+
+    - name: Debug - Resposta do tipo de cluster
+      debug:
+        msg:
+          - "Cluster type response: {{ cluster_type_response.json | default('N/A') }}"
 
     - name: Garantir cluster
       uri:
@@ -111,11 +162,18 @@
         status_code: [200, 201, 400]
         validate_certs: false
       delegate_to: localhost
+      register: cluster_creation
       failed_when: false
+
+    - name: Debug - Criação do cluster
+      debug:
+        msg:
+          - "Cluster creation status: {{ cluster_creation.status | default('N/A') }}"
+          - "Cluster creation response: {{ cluster_creation.json | default('N/A') }}"
 
     - name: Obter ID do cluster
       uri:
-        url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ vm_cluster }}"
+        url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ vm_cluster | urlencode }}"
         method: GET
         headers:
           Authorization: "Token {{ netbox_token }}"
@@ -123,13 +181,22 @@
       register: cluster_response
       delegate_to: localhost
 
+    - name: Debug - Resposta do cluster
+      debug:
+        msg:
+          - "Cluster response: {{ cluster_response.json | default('N/A') }}"
+
     - name: Definir cluster_id
       set_fact:
         cluster_id: "{{ (cluster_response.json.results | first).id if cluster_response.json.results else omit }}"
 
+    - name: Debug - Cluster ID
+      debug:
+        msg: "Cluster ID: {{ cluster_id | default('NÃO ENCONTRADO') }}"
+
     - name: Verificar se VM já existe no NetBox
       uri:
-        url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ vm_name }}"
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ vm_name | urlencode }}"
         method: GET
         headers:
           Authorization: "Token {{ netbox_token }}"
@@ -137,9 +204,18 @@
       register: vm_check_response
       delegate_to: localhost
 
+    - name: Debug - Verificação da VM
+      debug:
+        msg:
+          - "VM check response: {{ vm_check_response.json | default('N/A') }}"
+
     - name: Definir vm_id se já existir
       set_fact:
         vm_id: "{{ (vm_check_response.json.results | first).id if vm_check_response.json.results else omit }}"
+
+    - name: Debug - VM ID
+      debug:
+        msg: "VM ID: {{ vm_id | default('NÃO ENCONTRADO - SERÁ CRIADA') }}"
 
     - name: Montar payload da VM
       set_fact:
@@ -148,8 +224,8 @@
           status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
           site: "{{ site_id }}"
           cluster: "{{ cluster_id }}"
-          vcpus: "{{ vm_cpu_count }}"
-          memory: "{{ vm_memory_mb }}"
+          vcpus: "{{ vm_cpu_count | int }}"
+          memory: "{{ vm_memory_mb | int }}"
           disk: 100
           comments: |
             Sincronizado via AWX
@@ -157,6 +233,17 @@
             UUID: {{ vm_uuid }}
             Ambiente: {{ vm_environment }}
             Criticidade: {{ vm_criticality }}
+            Guest OS: {{ vm_guest_os }}
+            Hostname: {{ vm_hostname }}
+            IP: {{ vm_ip_addresses | join(', ') }}
+            Folder: {{ vm_folder }}
+
+    - name: Debug - Payload da VM
+      debug:
+        msg:
+          - "VM Payload: {{ vm_payload }}"
+          - "Método: {{ 'PATCH' if vm_id is defined else 'POST' }}"
+          - "URL: {{ netbox_url }}/api/virtualization/virtual-machines/{{ vm_id | default('') }}"
 
     - name: Criar ou atualizar VM no NetBox
       uri:
@@ -166,11 +253,24 @@
           Authorization: "Token {{ netbox_token }}"
           Content-Type: "application/json"
         body_format: json
-        body: "{{ vm_payload | to_json }}"
+        body: "{{ vm_payload }}"
         status_code: [200, 201]
         validate_certs: false
       register: vm_result
       delegate_to: localhost
+      failed_when: false
+
+    - name: Debug - Resultado da criação/atualização
+      debug:
+        msg:
+          - "VM result status: {{ vm_result.status | default('N/A') }}"
+          - "VM result response: {{ vm_result.json | default('N/A') }}"
+          - "VM result msg: {{ vm_result.msg | default('N/A') }}"
+
+    - name: Falhar se erro na criação/atualização da VM
+      fail:
+        msg: "Erro ao criar/atualizar VM: {{ vm_result.msg | default('Erro desconhecido') }} (Status: {{ vm_result.status | default('N/A') }})"
+      when: vm_result.status not in [200, 201]
 
     - name: Resultado final
       debug:

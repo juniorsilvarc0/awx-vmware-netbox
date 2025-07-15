@@ -1,6 +1,7 @@
 - name: Sincronizar VM ADAASD-SIDAPI01 no NetBox
   hosts: ADAASD-SIDAPI01
   gather_facts: false
+  become: false
   vars:
     ansible_connection: local
     netbox_url: "{{ lookup('env', 'NETBOX_API') | default('') }}"

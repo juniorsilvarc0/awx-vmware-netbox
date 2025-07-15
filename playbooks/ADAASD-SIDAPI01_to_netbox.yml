@@ -1,5 +1,5 @@
 - name: Sincronizar VM ADAASD-SIDAPI01 no NetBox
-  hosts: ADAASD-SIDAPI01
+  hosts: all
   gather_facts: false
   become: false
   vars:
@@ -11,16 +11,18 @@
     - name: Debug - Mostrar variáveis iniciais
       debug:
         msg:
-          - "NetBox URL: {{ netbox_url }}"
-          - "NetBox Token: {{ 'DEFINIDO' if netbox_token != '' else 'VAZIO' }}"
-          - "VM Name: {{ vm_name | default('NÃO DEFINIDO') }}"
-          - "VM Datacenter: {{ vm_datacenter | default('NÃO DEFINIDO') }}"
-          - "VM Cluster: {{ vm_cluster | default('NÃO DEFINIDO') }}"
-          - "VM Power State: {{ vm_power_state | default('NÃO DEFINIDO') }}"
-          - "VM CPU Count: {{ vm_cpu_count | default('NÃO DEFINIDO') }}"
-          - "VM Memory MB: {{ vm_memory_mb | default('NÃO DEFINIDO') }}"
-          - "VM UUID: {{ vm_uuid | default('NÃO DEFINIDO') }}"
-          - "Inventory Hostname: {{ inventory_hostname }}"
+          - "🔗 NetBox URL: {{ netbox_url }}"
+          - "🔑 NetBox Token: {{ 'DEFINIDO' if netbox_token != '' else 'VAZIO' }}"
+          - "🖥️  VM Name: {{ vm_name | default('NÃO DEFINIDO') }}"
+          - "🏢 VM Datacenter: {{ vm_datacenter | default('NÃO DEFINIDO') }}"
+          - "🔧 VM Cluster: {{ vm_cluster | default('NÃO DEFINIDO') }}"
+          - "⚡ VM Power State: {{ vm_power_state | default('NÃO DEFINIDO') }}"
+          - "💾 VM CPU Count: {{ vm_cpu_count | default('NÃO DEFINIDO') }}"
+          - "🧠 VM Memory MB: {{ vm_memory_mb | default('NÃO DEFINIDO') }}"
+          - "🆔 VM UUID: {{ vm_uuid | default('NÃO DEFINIDO') }}"
+          - "📍 Inventory Hostname: {{ inventory_hostname }}"
+          - "🌐 Ansible Host: {{ ansible_host | default('NÃO DEFINIDO') }}"
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Validar configuração
       fail:
@@ -31,7 +33,9 @@
           VM Name: {{ 'OK' if vm_name is defined else 'FALTANDO' }}
           VM Datacenter: {{ 'OK' if vm_datacenter is defined else 'FALTANDO' }}
           VM Cluster: {{ 'OK' if vm_cluster is defined else 'FALTANDO' }}
-      when: netbox_url == '' or netbox_token == '' or vm_name is not defined or vm_name == '' or vm_datacenter is not defined or vm_cluster is not defined
+      when: 
+        - inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+        - netbox_url == '' or netbox_token == '' or vm_name is not defined or vm_name == '' or vm_datacenter is not defined or vm_cluster is not defined
 
     - name: Testar conectividade NetBox
       uri:
@@ -45,6 +49,7 @@
       run_once: true
       delegate_to: localhost
       failed_when: false
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Status do NetBox
       debug:
@@ -57,7 +62,9 @@
       fail:
         msg: "NetBox inacessível: {{ netbox_status.msg | default('Erro desconhecido') }} (Status: {{ netbox_status.status | default('N/A') }})"
       run_once: true
-      when: netbox_status.status != 200
+      when: 
+        - inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+        - (netbox_status.status | default(0)) != 200
 
     - name: Garantir site no NetBox
       uri:
@@ -77,6 +84,7 @@
       delegate_to: localhost
       register: site_creation
       failed_when: false
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Criação do site
       debug:
@@ -94,6 +102,7 @@
         validate_certs: false
       register: site_response
       delegate_to: localhost
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Resposta do site
       debug:
@@ -103,6 +112,7 @@
     - name: Definir site_id
       set_fact:
         site_id: "{{ (site_response.json.results | first).id if site_response.json.results else omit }}"
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Site ID
       debug:
@@ -125,6 +135,7 @@
       delegate_to: localhost
       register: cluster_type_creation
       failed_when: false
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Criação do tipo de cluster
       debug:
@@ -142,6 +153,7 @@
       register: cluster_type_response
       run_once: true
       delegate_to: localhost
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Resposta do tipo de cluster
       debug:
@@ -165,6 +177,7 @@
       delegate_to: localhost
       register: cluster_creation
       failed_when: false
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Criação do cluster
       debug:
@@ -181,6 +194,7 @@
         return_content: true
       register: cluster_response
       delegate_to: localhost
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Resposta do cluster
       debug:
@@ -190,6 +204,7 @@
     - name: Definir cluster_id
       set_fact:
         cluster_id: "{{ (cluster_response.json.results | first).id if cluster_response.json.results else omit }}"
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Cluster ID
       debug:
@@ -212,7 +227,10 @@
 
     - name: Definir vm_id se já existir
       set_fact:
-        vm_id: "{{ (vm_check_response.json.results | first).id if vm_check_response.json.results else omit }}"
+        vm_id: "{{ (vm_check_response.json.results | first).id }}"
+      when: 
+        - inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+        - vm_check_response.json.results | length > 0
 
     - name: Debug - VM ID
       debug:
@@ -260,6 +278,7 @@
       register: vm_result
       delegate_to: localhost
       failed_when: false
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
 
     - name: Debug - Resultado da criação/atualização
       debug:
@@ -271,11 +290,15 @@
     - name: Falhar se erro na criação/atualização da VM
       fail:
         msg: "Erro ao criar/atualizar VM: {{ vm_result.msg | default('Erro desconhecido') }} (Status: {{ vm_result.status | default('N/A') }})"
-      when: vm_result.status not in [200, 201]
+      when: 
+        - inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+        - vm_result.status not in [200, 201]
 
     - name: Resultado final
       debug:
         msg:
-          - "VM: {{ vm_name }}"
-          - "Status: {{ vm_result.status }}"
-          - "{{ 'CRIADA' if vm_result.status == 201 else 'ATUALIZADA' if vm_result.status == 200 else 'ERRO' }}"
+          - "🖥️  VM: {{ vm_name }}"
+          - "📊 Status: {{ vm_result.status }}"
+          - "✅ Resultado: {{ 'CRIADA' if vm_result.status == 201 else 'ATUALIZADA' if vm_result.status == 200 else 'ERRO' }}"
+          - "🆔 NetBox ID: {{ vm_result.json.id | default('N/A') }}"
+      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"

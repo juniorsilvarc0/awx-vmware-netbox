@@ -287,6 +287,13 @@ class InventoryModule(BaseInventoryPlugin):
 
                 memory_gb = round((summary.config.memorySizeMB / 1024), 1) if summary.config else 0
 
+                # Calcular capacidade total do disco
+                disk_total_gb = 0
+                if config and config.hardware and config.hardware.device:
+                    for device in config.hardware.device:
+                        if hasattr(device, 'capacityInKB') and device.capacityInKB:
+                            disk_total_gb += round((device.capacityInKB / 1024 / 1024), 1)
+
                 vm_data = {
                     'ansible_host': ip_addresses[0] if ip_addresses else None,
                     'vm_name': self._sanitize_string(name),
@@ -309,7 +316,9 @@ class InventoryModule(BaseInventoryPlugin):
                     'vm_is_windows': 'windows' in (config.guestFullName.lower() if config and config.guestFullName else ''),
                     'vm_is_linux': any(x in (config.guestFullName.lower() if config and config.guestFullName else '') for x in ['linux', 'ubuntu', 'centos', 'red hat', 'suse', 'debian']),
                     'vm_cpu_category': 'high' if summary.config.numCpu >= 8 else 'medium' if summary.config.numCpu >= 4 else 'low',
-                    'vm_memory_category': 'high' if memory_gb >= 16 else 'medium' if memory_gb >= 8 else 'low' if memory_gb >= 4 else 'minimal'
+                    'vm_memory_category': 'high' if memory_gb >= 16 else 'medium' if memory_gb >= 8 else 'low' if memory_gb >= 4 else 'minimal',
+                    'vm_disk_total_gb': disk_total_gb,
+                    'vm_disk_category': 'high' if disk_total_gb >= 1000 else 'medium' if disk_total_gb >= 500 else 'low' if disk_total_gb >= 100 else 'minimal'
                 }
 
                 # Sanitizar nome do host para evitar problemas

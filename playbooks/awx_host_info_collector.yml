@@ -1,13 +1,13 @@
 - name: 📊 AWX Host Information Collector
-  hosts: 127.0.0.1
+  hosts: localhost
   gather_facts: false
   connection: local
   vars:
     ansible_connection: local
-  
+
   tasks:
     - name: 🐍 Executar script Python para coleta de informações do host
-      command: python3 scripts/awx_host_info.py {{ host_name | default('ADAASD-SIDAPI01') }}
+      command: python3 "{{ playbook_dir }}/../scripts/awx_host_info.py" "{{ host_name | default('ADAASD-SIDAPI01') }}"
       become: no
       environment:
         AWX_USERNAME: "{{ ansible_env.AWX_USERNAME }}"
@@ -16,7 +16,7 @@
         AWX_INVENTORY_ID: "{{ awx_inventory_id | default('3') }}"
         HOST_NAME: "{{ host_name | default('ADAASD-SIDAPI01') }}"
       register: script_output
-      
+
     - name: 📋 Exibir resultado do script
       debug:
         msg: "{{ script_output.stdout }}"

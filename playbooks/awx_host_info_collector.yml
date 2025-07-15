@@ -1,0 +1,191 @@
+---
+- name: 📊 Coletar Informações do Host via API AWX
+  hosts: localhost
+  gather_facts: false
+  vars:
+    ansible_connection: local
+    awx_url: "http://localhost:8013"
+    awx_username: "{{ lookup('env', 'AWX_USERNAME') | default('junior') }}"
+    awx_password: "{{ lookup('env', 'AWX_PASSWORD') | default('') }}"
+    awx_inventory_id: "{{ lookup('env', 'AWX_INVENTORY_ID') | default('3') }}"
+    target_host: "{{ lookup('env', 'TARGET_HOST') | default('ADAASD-SIDAPI01') }}"
+
+  tasks:
+    - name: 🔐 Validar credenciais AWX
+      fail:
+        msg: |
+          ❌ Credenciais AWX não configuradas!
+          Configure a variável AWX_PASSWORD ou defina awx_password
+      when: awx_password == '' or awx_password is not defined
+
+    - name: 🔍 Buscar host {{ target_host }} no inventário AWX
+      uri:
+        url: "{{ awx_url }}/api/v2/inventories/{{ awx_inventory_id }}/hosts/"
+        method: GET
+        user: "{{ awx_username }}"
+        password: "{{ awx_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: [200]
+        validate_certs: false
+      register: awx_hosts_response
+
+    - name: 📋 Filtrar host específico
+      set_fact:
+        target_host_data: "{{ awx_hosts_response.json.results | selectattr('name', 'equalto', target_host) | list | first | default({}) }}"
+
+    - name: ❌ Falhar se host não encontrado
+      fail:
+        msg: |
+          Host '{{ target_host }}' não encontrado no inventário {{ awx_inventory_id }}.
+          Hosts disponíveis: {{ awx_hosts_response.json.results | map(attribute='name') | list | join(', ') }}
+      when: target_host_data == {}
+
+    - name: ✅ Host encontrado - Informações básicas
+      debug:
+        msg:
+          - "🎯 Host: {{ target_host_data.name }}"
+          - "🆔 ID: {{ target_host_data.id }}"
+          - "📝 Descrição: {{ target_host_data.description | default('N/A') }}"
+          - "🔄 Habilitado: {{ target_host_data.enabled }}"
+
+    - name: 🔧 Obter detalhes completos do host
+      uri:
+        url: "{{ awx_url }}/api/v2/hosts/{{ target_host_data.id }}/"
+        method: GET
+        user: "{{ awx_username }}"
+        password: "{{ awx_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: [200]
+        validate_certs: false
+      register: awx_host_details
+
+    - name: 📊 Extrair variáveis do host
+      set_fact:
+        host_variables: "{{ awx_host_details.json.variables | from_yaml if awx_host_details.json.variables else {} }}"
+
+    - name: 🔧 Mostrar variáveis do host
+      debug:
+        msg:
+          - "📦 Variáveis do host {{ target_host }}:"
+          - "{{ host_variables | to_nice_yaml if host_variables else 'ℹ️ Nenhuma variável definida' }}"
+
+    - name: 🖥️ Obter Ansible Facts do host
+      uri:
+        url: "{{ awx_url }}/api/v2/hosts/{{ target_host_data.id }}/ansible_facts/"
+        method: GET
+        user: "{{ awx_username }}"
+        password: "{{ awx_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: [200, 404]
+        validate_certs: false
+      register: awx_ansible_facts
+      failed_when: false
+
+    - name: 📊 Processar Ansible Facts
+      set_fact:
+        system_facts: "{{ awx_ansible_facts.json if awx_ansible_facts.status == 200 else {} }}"
+
+    - name: 🖥️ Mostrar informações do sistema
+      debug:
+        msg:
+          - "🔍 Informações do Sistema:"
+          - "  🏷️ Hostname: {{ system_facts.ansible_hostname | default('N/A') }}"
+          - "  🌐 FQDN: {{ system_facts.ansible_fqdn | default('N/A') }}"
+          - "  🏢 OS Family: {{ system_facts.ansible_os_family | default('N/A') }}"
+          - "  💿 Distribuição: {{ system_facts.ansible_distribution | default('N/A') }} {{ system_facts.ansible_distribution_version | default('') }}"
+          - "  🏗️ Arquitetura: {{ system_facts.ansible_architecture | default('N/A') }}"
+          - "  💾 CPU Cores: {{ system_facts.ansible_processor_cores | default('N/A') }}"
+          - "  🧠 Memória (MB): {{ system_facts.ansible_memtotal_mb | default('N/A') }}"
+          - "  🌐 IP Principal: {{ system_facts.ansible_default_ipv4.address | default('N/A') }}"
+      when: system_facts != {}
+
+    - name: 🌐 Processar interfaces de rede
+      set_fact:
+        network_interfaces: >-
+          {{
+            system_facts.ansible_interfaces | default([]) |
+            map('regex_replace', '^(.*)$', 'ansible_\1') |
+            map('extract', system_facts, 'ipv4') |
+            select('defined') |
+            list
+          }}
+      when: system_facts != {}
+
+    - name: 🌐 Mostrar interfaces de rede
+      debug:
+        msg:
+          - "🌐 Interfaces de Rede:"
+          - "{{ network_interfaces | map('default', {'address': 'sem IP'}) | map(attribute='address') | list }}"
+      when: 
+        - system_facts != {}
+        - network_interfaces is defined
+
+    - name: 👥 Obter grupos do host
+      uri:
+        url: "{{ awx_url }}/api/v2/hosts/{{ target_host_data.id }}/groups/"
+        method: GET
+        user: "{{ awx_username }}"
+        password: "{{ awx_password }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: [200]
+        validate_certs: false
+      register: awx_host_groups
+
+    - name: 👥 Mostrar grupos do host
+      debug:
+        msg:
+          - "👥 Grupos do host:"
+          - "{{ awx_host_groups.json.results | map(attribute='name') | list | join(', ') if awx_host_groups.json.results else 'ℹ️ Host não pertence a nenhum grupo' }}"
+
+    - name: 📄 Gerar relatório consolidado
+      debug:
+        msg:
+          - "╔════════════════════════════════════════╗"
+          - "║        📊 RELATÓRIO DO HOST            ║"
+          - "╠════════════════════════════════════════╣"
+          - "║ 🎯 Host: {{ target_host_data.name.ljust(27) }} ║"
+          - "║ 🆔 AWX ID: {{ target_host_data.id | string | ljust(24) }} ║"
+          - "║ 📦 Inventário: {{ awx_inventory_id.ljust(20) }} ║"
+          - "║ 🔄 Status: {{ ('Ativo' if target_host_data.enabled else 'Inativo').ljust(24) }} ║"
+          - "║ 👥 Grupos: {{ (awx_host_groups.json.results | length | string).ljust(24) }} ║"
+          - "║ 🔧 Variáveis: {{ (host_variables | length | string).ljust(19) }} ║"
+          - "║ 🖥️ Facts: {{ ('Sim' if system_facts != {} else 'Não').ljust(25) }} ║"
+          - "╚════════════════════════════════════════╝"
+
+    - name: 💾 Exportar dados para JSON
+      copy:
+        content: |
+          {
+            "host_info": {{ target_host_data | to_nice_json }},
+            "host_variables": {{ host_variables | to_nice_json }},
+            "ansible_facts": {{ system_facts | to_nice_json }},
+            "host_groups": {{ awx_host_groups.json.results | to_nice_json }},
+            "collection_timestamp": "{{ ansible_date_time.iso8601 }}",
+            "awx_inventory_id": "{{ awx_inventory_id }}"
+          }
+        dest: "/tmp/awx_host_{{ target_host }}_{{ ansible_date_time.epoch }}.json"
+      register: json_export
+
+    - name: 📁 Local do arquivo exportado
+      debug:
+        msg: 
+          - "💾 Dados exportados para: {{ json_export.dest }}"
+          - "📊 Comando para visualizar: jq '.' {{ json_export.dest }}"
+
+    - name: 🛠️ Comandos úteis para consulta manual
+      debug:
+        msg:
+          - "🔧 Comandos AWX CLI úteis:"
+          - ""
+          - "# Obter variáveis do host:"
+          - "curl -u '{{ awx_username }}:$AWX_PASSWORD' '{{ awx_url }}/api/v2/hosts/{{ target_host_data.id }}/' | jq '.variables'"
+          - ""
+          - "# Obter facts do host:"
+          - "curl -u '{{ awx_username }}:$AWX_PASSWORD' '{{ awx_url }}/api/v2/hosts/{{ target_host_data.id }}/ansible_facts/'"
+          - ""
+          - "# Listar todos os hosts do inventário:"
+          - "curl -u '{{ awx_username }}:$AWX_PASSWORD' '{{ awx_url }}/api/v2/inventories/{{ awx_inventory_id }}/hosts/' | jq '.results[].name'"

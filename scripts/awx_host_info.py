@@ -7,6 +7,7 @@ Similar ao teste.sh, mas em Python com melhor tratamento de erros
 import json
 import requests
 import sys
+import os
 from typing import Dict, Any, Optional
 
 
@@ -166,17 +167,31 @@ class AWXHostInfo:
 
 
 def main():
-    # Configurações (devem ser passadas como variáveis de ambiente ou argumentos)
-    AWX_URL = "http://10.0.100.159:8013"
-    USERNAME = "junior"
-    PASSWORD = "JR83silV@83"
-    INVENTORY_ID = 3  # VMware Inventory
+    # Configurações obtidas das variáveis de ambiente (injetadas pelo AWX)
+    AWX_URL = os.getenv('AWX_API_URL', 'http://10.0.100.159:8013')
+    USERNAME = os.getenv('AWX_USERNAME')
+    PASSWORD = os.getenv('AWX_PASSWORD')
+    INVENTORY_ID = int(os.getenv('AWX_INVENTORY_ID', '3'))
     
-    # Host a ser consultado
+    # Verificar se credenciais foram fornecidas
+    if not USERNAME or not PASSWORD:
+        print("❌ Erro: Credenciais AWX não encontradas nas variáveis de ambiente")
+        print("   Certifique-se de que AWX_USERNAME e AWX_PASSWORD estão configuradas")
+        sys.exit(1)
+    
+    # Host a ser consultado (da variável de ambiente ou argumento)
+    HOST_NAME = os.getenv('HOST_NAME')
     if len(sys.argv) > 1:
         HOST_NAME = sys.argv[1]
-    else:
+    elif not HOST_NAME:
         HOST_NAME = "ADAASD-SIDAPI01"
+    
+    print(f"📊 AWX Host Information Collector")
+    print(f"🔗 AWX URL: {AWX_URL}")
+    print(f"👤 Usuário: {USERNAME}")
+    print(f"📦 Inventário ID: {INVENTORY_ID}")
+    print(f"🎯 Host alvo: {HOST_NAME}")
+    print()
     
     # Criar instância e executar consulta
     awx_client = AWXHostInfo(AWX_URL, USERNAME, PASSWORD, INVENTORY_ID)

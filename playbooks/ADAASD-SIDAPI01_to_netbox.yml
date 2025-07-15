@@ -13,16 +13,16 @@
         msg:
           - "🔗 NetBox URL: {{ netbox_url }}"
           - "🔑 NetBox Token: {{ 'DEFINIDO' if netbox_token != '' else 'VAZIO' }}"
-          - "🖥️  VM Name: {{ vm_name | default('NÃO DEFINIDO') }}"
-          - "🏢 VM Datacenter: {{ vm_datacenter | default('NÃO DEFINIDO') }}"
-          - "🔧 VM Cluster: {{ vm_cluster | default('NÃO DEFINIDO') }}"
-          - "⚡ VM Power State: {{ vm_power_state | default('NÃO DEFINIDO') }}"
-          - "💾 VM CPU Count: {{ vm_cpu_count | default('NÃO DEFINIDO') }}"
-          - "🧠 VM Memory MB: {{ vm_memory_mb | default('NÃO DEFINIDO') }}"
-          - "🆔 VM UUID: {{ vm_uuid | default('NÃO DEFINIDO') }}"
+          - "🖥️  VM Name: {{ inventory_hostname }}"
+          - "🏢 VM Site: {{ sites | first | default('NÃO DEFINIDO') }}"
+          - "🔧 VM Cluster: {{ cluster | default('NÃO DEFINIDO') }}"
+          - "⚡ VM Status: {{ status.label | default('NÃO DEFINIDO') }}"
+          - "💾 VM CPU Count: {{ vcpus | default('NÃO DEFINIDO') }}"
+          - "🧠 VM Memory GB: {{ memory | default('NÃO DEFINIDO') }}"
+          - "💿 VM Disk GB: {{ disk | default('NÃO DEFINIDO') }}"
           - "📍 Inventory Hostname: {{ inventory_hostname }}"
           - "🌐 Ansible Host: {{ ansible_host | default('NÃO DEFINIDO') }}"
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Validar configuração
       fail:
@@ -30,12 +30,12 @@
           Configuração inválida:
           NetBox URL: {{ 'OK' if netbox_url != '' else 'FALTANDO' }}
           NetBox Token: {{ 'OK' if netbox_token != '' else 'FALTANDO' }}
-          VM Name: {{ 'OK' if vm_name is defined else 'FALTANDO' }}
-          VM Datacenter: {{ 'OK' if vm_datacenter is defined else 'FALTANDO' }}
-          VM Cluster: {{ 'OK' if vm_cluster is defined else 'FALTANDO' }}
+          VM Name: {{ 'OK' if inventory_hostname is defined else 'FALTANDO' }}
+          VM Site: {{ 'OK' if sites is defined and sites|length > 0 else 'FALTANDO' }}
+          VM Cluster: {{ 'OK' if cluster is defined else 'FALTANDO' }}
       when: 
-        - inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
-        - netbox_url == '' or netbox_token == '' or vm_name is not defined or vm_name == '' or vm_datacenter is not defined or vm_cluster is not defined
+        - inventory_hostname == "ADAASD-SIDAPI01"
+        - netbox_url == '' or netbox_token == '' or inventory_hostname is not defined or inventory_hostname == '' or sites is not defined or sites|length == 0 or cluster is not defined
 
     - name: Testar conectividade NetBox
       uri:
@@ -49,7 +49,7 @@
       run_once: true
       delegate_to: localhost
       failed_when: false
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Status do NetBox
       debug:
@@ -75,8 +75,8 @@
           Content-Type: "application/json"
         body_format: json
         body:
-          name: "{{ vm_datacenter }}"
-          slug: "{{ vm_datacenter | lower | replace('_', '-') }}"
+          name: "{{ sites | first }}"
+          slug: "{{ sites | first | lower | replace('_', '-') }}"
           status: "active"
         status_code: [200, 201, 400]
         validate_certs: false
@@ -84,7 +84,7 @@
       delegate_to: localhost
       register: site_creation
       failed_when: false
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Criação do site
       debug:
@@ -94,7 +94,7 @@
 
     - name: Obter site_id
       uri:
-        url: "{{ netbox_url }}/api/dcim/sites/?name={{ vm_datacenter | urlencode }}"
+        url: "{{ netbox_url }}/api/dcim/sites/?name={{ sites | first | urlencode }}"
         method: GET
         headers:
           Authorization: "Token {{ netbox_token }}"
@@ -102,7 +102,7 @@
         validate_certs: false
       register: site_response
       delegate_to: localhost
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Resposta do site
       debug:
@@ -112,7 +112,7 @@
     - name: Definir site_id
       set_fact:
         site_id: "{{ (site_response.json.results | first).id if site_response.json.results else omit }}"
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Site ID
       debug:
@@ -135,7 +135,7 @@
       delegate_to: localhost
       register: cluster_type_creation
       failed_when: false
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Criação do tipo de cluster
       debug:
@@ -153,7 +153,7 @@
       register: cluster_type_response
       run_once: true
       delegate_to: localhost
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Resposta do tipo de cluster
       debug:
@@ -169,7 +169,7 @@
           Content-Type: "application/json"
         body_format: json
         body:
-          name: "{{ vm_cluster }}"
+          name: "{{ cluster }}"
           type: "{{ (cluster_type_response.json.results | first).id }}"
           site: "{{ site_id }}"
         status_code: [200, 201, 400]
@@ -177,7 +177,7 @@
       delegate_to: localhost
       register: cluster_creation
       failed_when: false
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Criação do cluster
       debug:
@@ -187,14 +187,14 @@
 
     - name: Obter ID do cluster
       uri:
-        url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ vm_cluster | urlencode }}"
+        url: "{{ netbox_url }}/api/virtualization/clusters/?name={{ cluster | urlencode }}"
         method: GET
         headers:
           Authorization: "Token {{ netbox_token }}"
         return_content: true
       register: cluster_response
       delegate_to: localhost
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Resposta do cluster
       debug:
@@ -204,7 +204,7 @@
     - name: Definir cluster_id
       set_fact:
         cluster_id: "{{ (cluster_response.json.results | first).id if cluster_response.json.results else omit }}"
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Cluster ID
       debug:
@@ -212,7 +212,7 @@
 
     - name: Verificar se VM já existe no NetBox
       uri:
-        url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ vm_name | urlencode }}"
+        url: "{{ netbox_url }}/api/virtualization/virtual-machines/?name={{ inventory_hostname | urlencode }}"
         method: GET
         headers:
           Authorization: "Token {{ netbox_token }}"
@@ -239,23 +239,21 @@
     - name: Montar payload da VM
       set_fact:
         vm_payload:
-          name: "{{ vm_name }}"
-          status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
+          name: "{{ inventory_hostname }}"
+          status: "{{ status.value }}"
           site: "{{ site_id }}"
           cluster: "{{ cluster_id }}"
-          vcpus: "{{ vm_cpu_count | int }}"
-          memory: "{{ vm_memory_mb | int }}"
-          disk: 100
+          vcpus: "{{ vcpus | int }}"
+          memory: "{{ memory | int * 1024 }}"
+          disk: "{{ disk | int }}"
           comments: |
             Sincronizado via AWX
             Host: {{ inventory_hostname }}
-            UUID: {{ vm_uuid }}
-            Ambiente: {{ vm_environment }}
-            Criticidade: {{ vm_criticality }}
-            Guest OS: {{ vm_guest_os }}
-            Hostname: {{ vm_hostname }}
-            IP: {{ vm_ip_addresses | join(', ') }}
-            Folder: {{ vm_folder }}
+            Cluster Type: {{ cluster_type }}
+            Primary IP4: {{ primary_ip4 }}
+            Primary IP6: {{ primary_ip6 }}
+            Status: {{ status.label }}
+            Serial: {{ serial | default('N/A') }}
 
     - name: Debug - Payload da VM
       debug:
@@ -278,7 +276,7 @@
       register: vm_result
       delegate_to: localhost
       failed_when: false
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"
 
     - name: Debug - Resultado da criação/atualização
       debug:
@@ -297,8 +295,8 @@
     - name: Resultado final
       debug:
         msg:
-          - "🖥️  VM: {{ vm_name }}"
+          - "🖥️  VM: {{ inventory_hostname }}"
           - "📊 Status: {{ vm_result.status }}"
           - "✅ Resultado: {{ 'CRIADA' if vm_result.status == 201 else 'ATUALIZADA' if vm_result.status == 200 else 'ERRO' }}"
           - "🆔 NetBox ID: {{ vm_result.json.id | default('N/A') }}"
-      when: inventory_hostname == "ADAASD-SIDAPI01" or vm_name == "ADAASD-SIDAPI01"
+      when: inventory_hostname == "ADAASD-SIDAPI01"

@@ -237,6 +237,8 @@ class InventoryModule(BaseInventoryPlugin):
         except Exception as e:
             print(f"   ⚠️  Erro ao buscar tags via pyVmomi: {str(e)}")
             return []
+
+    def _cleanup_awx_variables(self):
         """Remove variáveis problemáticas que o AWX pode injetar automaticamente"""
         print("🧹 Executando limpeza agressiva de variáveis AWX...")
         

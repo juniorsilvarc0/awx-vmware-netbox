@@ -5,6 +5,7 @@ import os
 import ssl
 import re
 import json
+import requests
 from ansible.plugins.inventory import BaseInventoryPlugin
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
@@ -49,6 +50,76 @@ class InventoryModule(BaseInventoryPlugin):
             
             return value.strip()
         return value
+
+    def _get_vcenter_rest_session(self, vcenter_host, username, password):
+        """Cria uma sessão REST autenticada com o vCenter"""
+        session = requests.Session()
+        session.verify = False
+        
+        # Desabilitar avisos SSL
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        
+        # Autenticar
+        auth_url = f"https://{vcenter_host}/rest/com/vmware/cis/session"
+        auth_response = session.post(auth_url, auth=(username, password))
+        
+        if auth_response.status_code != 200:
+            print(f"❌ Erro ao autenticar na API REST: {auth_response.status_code}")
+            return None
+            
+        session_id = auth_response.json().get('value')
+        session.headers.update({'vmware-api-session-id': session_id})
+        
+        return session
+
+    def _get_vm_tags_via_rest(self, session, vcenter_host, vm_id):
+        """Busca tags de uma VM usando a API REST do vCenter"""
+        try:
+            # Buscar tags da VM
+            tags_url = f"https://{vcenter_host}/rest/vcenter/vm/{vm_id}/tags"
+            response = session.get(tags_url)
+            
+            if response.status_code != 200:
+                print(f"⚠️  Erro ao buscar tags para VM {vm_id}: {response.status_code}")
+                return []
+            
+            tag_ids = response.json().get('value', [])
+            tags = []
+            
+            # Para cada tag ID, buscar detalhes
+            for tag_id in tag_ids:
+                tag_details_url = f"https://{vcenter_host}/rest/com/vmware/cis/tagging/tag/{tag_id}"
+                tag_response = session.get(tag_details_url)
+                
+                if tag_response.status_code == 200:
+                    tag_data = tag_response.json().get('value', {})
+                    
+                    # Buscar detalhes da categoria
+                    category_id = tag_data.get('category_id')
+                    category_name = None
+                    if category_id:
+                        category_url = f"https://{vcenter_host}/rest/com/vmware/cis/tagging/category/{category_id}"
+                        category_response = session.get(category_url)
+                        if category_response.status_code == 200:
+                            category_data = category_response.json().get('value', {})
+                            category_name = category_data.get('name')
+                    
+                    tag_info = {
+                        'name': self._sanitize_string(tag_data.get('name')),
+                        'category': self._sanitize_string(category_name),
+                        'description': self._sanitize_string(tag_data.get('description'))
+                    }
+                    
+                    if tag_info['name']:
+                        tags.append(tag_info)
+                        print(f"   ✅ Tag encontrada: {tag_info['name']} ({tag_info['category']})")
+            
+            return tags
+            
+        except Exception as e:
+            print(f"❌ Erro ao buscar tags via REST: {str(e)}")
+            return []
 
     def _cleanup_awx_variables(self):
         """Remove variáveis problemáticas que o AWX pode injetar automaticamente"""
@@ -192,38 +263,6 @@ class InventoryModule(BaseInventoryPlugin):
         
         print(f"✅ Limpeza final concluída. Hosts restantes: {len(self.inventory.hosts)}")
 
-    def _monkey_patch_awx_injection(self):
-        """Monkey patch para interceptar injeção de variáveis do AWX"""
-        print("🐒 Aplicando monkey patch para bloquear injeção AWX...")
-        
-        # Salvar referência original do método set_variable
-        original_set_variable = self.inventory.set_variable
-        
-        def blocked_set_variable(host, var, value):
-            """Versão bloqueada do set_variable que filtra variáveis AWX"""
-            # Lista de variáveis a serem bloqueadas
-            blocked_vars = [
-                'remote_host_enabled', 'remote_host_id', 'remote_tower_enabled', 'remote_tower_id',
-                'tower_enabled', 'tower_id', 'awx_enabled', 'awx_id'
-            ]
-            
-            # Bloquear variáveis problemáticas
-            if var in blocked_vars:
-                print(f"🚫 BLOQUEADO: Tentativa de injetar {var}={value} no host {host}")
-                return  # NÃO adicionar a variável
-            
-            # Bloquear valores que contenham sequências problemáticas
-            if isinstance(value, str) and any(problem in str(value) for problem in ['564dba5b-c886-5576-5ce2-8e7f4889d270', '}}}}', '"remote_']):
-                print(f"🚫 BLOQUEADO: Variável {var} com valor suspeito no host {host}")
-                return  # NÃO adicionar a variável
-            
-            # Se passou nos filtros, permitir
-            return original_set_variable(host, var, value)
-        
-        # Aplicar o monkey patch
-        self.inventory.set_variable = blocked_set_variable
-        print("✅ Monkey patch aplicado com sucesso")
-
     def parse(self, inventory, loader, path, cache=True):
         self.inventory = inventory
         self.loader = loader
@@ -239,6 +278,14 @@ class InventoryModule(BaseInventoryPlugin):
         missing = [k for k, v in vcenter_config.items() if v is None]
         if missing:
             raise Exception(f"Missing required environment variables: {', '.join(missing)}")
+
+        # Criar sessão REST para buscar tags
+        print("🔑 Criando sessão REST com vCenter...")
+        rest_session = self._get_vcenter_rest_session(
+            vcenter_config['host'],
+            vcenter_config['user'],
+            vcenter_config['pwd']
+        )
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
@@ -259,9 +306,6 @@ class InventoryModule(BaseInventoryPlugin):
         )
         if not datacenter:
             raise Exception(f"Datacenter {vcenter_config['datacenter']} not found")
-
-        # Preparar coleta de tags usando métodos alternativos
-        print("🏷️ Preparando coleta de tags das VMs...")
 
         container = content.viewManager.CreateContainerView(
             datacenter.vmFolder, [vim.VirtualMachine], True
@@ -297,87 +341,12 @@ class InventoryModule(BaseInventoryPlugin):
                         if hasattr(device, 'capacityInKB') and device.capacityInKB:
                             disk_total_gb += round((device.capacityInKB / 1024 / 1024), 1)
 
-                # Coletar tags atribuídas à VM
+                # Buscar tags via API REST
                 vm_tags = []
-                print(f"🔍 Coletando tags para VM: {name}")
-                
-                # Debug: Verificar propriedades disponíveis
-                print(f"  - VM tem summary: {hasattr(vm, 'summary')}")
-                print(f"  - VM tem tag: {hasattr(vm, 'tag')}")
-                print(f"  - VM tem customValue: {hasattr(vm, 'customValue')}")
-                if hasattr(vm, 'summary'):
-                    print(f"  - Summary tem tag: {hasattr(vm.summary, 'tag')}")
-                if hasattr(vm, 'config'):
-                    print(f"  - Config tem extraConfig: {hasattr(vm.config, 'extraConfig')}")
-                
-                try:
-                    # Método 1: Tentar coletar tags via summary.tag (mais comum)
-                    if hasattr(vm, 'summary') and hasattr(vm.summary, 'tag') and vm.summary.tag:
-                        for tag in vm.summary.tag:
-                            try:
-                                tag_info = {
-                                    'name': self._sanitize_string(tag.name) if hasattr(tag, 'name') else None,
-                                    'category': self._sanitize_string(tag.category.name) if hasattr(tag, 'category') and tag.category and hasattr(tag.category, 'name') else None,
-                                    'description': self._sanitize_string(tag.description) if hasattr(tag, 'description') else None
-                                }
-                                if tag_info['name']:
-                                    vm_tags.append(tag_info)
-                            except Exception as e:
-                                print(f"Erro processando tag summary para VM {name}: {str(e)}")
-                                continue
-                    
-                    # Método 2: Tentar via propriedade tag da VM diretamente
-                    if not vm_tags and hasattr(vm, 'tag') and vm.tag:
-                        for tag in vm.tag:
-                            try:
-                                tag_info = {
-                                    'name': self._sanitize_string(tag.name) if hasattr(tag, 'name') else None,
-                                    'category': self._sanitize_string(tag.category.name) if hasattr(tag, 'category') and tag.category and hasattr(tag.category, 'name') else None,
-                                    'description': self._sanitize_string(tag.description) if hasattr(tag, 'description') else None
-                                }
-                                if tag_info['name']:
-                                    vm_tags.append(tag_info)
-                            except Exception as e:
-                                print(f"Erro processando tag para VM {name}: {str(e)}")
-                                continue
-                    
-                    # Método 3: Tentar via config.extraConfig para tags personalizadas
-                    if not vm_tags and config and hasattr(config, 'extraConfig') and config.extraConfig:
-                        for extra_config in config.extraConfig:
-                            if hasattr(extra_config, 'key') and 'tag' in extra_config.key.lower():
-                                try:
-                                    tag_info = {
-                                        'name': self._sanitize_string(extra_config.key),
-                                        'category': 'extraConfig',
-                                        'description': self._sanitize_string(extra_config.value) if hasattr(extra_config, 'value') else None
-                                    }
-                                    if tag_info['name']:
-                                        vm_tags.append(tag_info)
-                                except Exception as e:
-                                    print(f"Erro processando extraConfig para VM {name}: {str(e)}")
-                                    continue
-                    
-                    # Método 4: Tentar via customValue (custom attributes)
-                    if not vm_tags and hasattr(vm, 'customValue') and vm.customValue:
-                        for custom_val in vm.customValue:
-                            try:
-                                if hasattr(custom_val, 'key') and hasattr(custom_val.key, 'name'):
-                                    tag_info = {
-                                        'name': self._sanitize_string(custom_val.key.name),
-                                        'category': 'custom_attribute',
-                                        'description': self._sanitize_string(custom_val.value) if hasattr(custom_val, 'value') else None
-                                    }
-                                    if tag_info['name']:
-                                        vm_tags.append(tag_info)
-                            except Exception as e:
-                                print(f"Erro processando customValue para VM {name}: {str(e)}")
-                                continue
-                
-                except Exception as e:
-                    print(f"Erro geral coletando tags para VM {name}: {str(e)}")
-                    vm_tags = []
-                
-                print(f"✅ VM {name}: {len(vm_tags)} tags coletadas")
+                if rest_session and hasattr(vm, '_moId'):
+                    print(f"🔍 Buscando tags para VM: {name} (ID: {vm._moId})")
+                    vm_tags = self._get_vm_tags_via_rest(rest_session, vcenter_config['host'], vm._moId)
+                    print(f"✅ VM {name}: {len(vm_tags)} tags encontradas")
 
                 vm_data = {
                     'ansible_host': ip_addresses[0] if ip_addresses else None,
@@ -445,7 +414,6 @@ class InventoryModule(BaseInventoryPlugin):
                         if isinstance(v, str):
                             v = self._sanitize_string(v)
                         self.inventory.set_variable(safe_name, k, v)
-                        print(f"✅ PERMITIDO: {k}={v}")
 
                 # Criar grupos por estado de energia
                 if runtime and runtime.powerState == 'poweredOn':
@@ -465,6 +433,20 @@ class InventoryModule(BaseInventoryPlugin):
                 elif vm_data['vm_is_linux']:
                     self.inventory.add_group('linux')
                     self.inventory.add_child('linux', safe_name)
+                
+                # Criar grupos por tags
+                for tag in vm_tags:
+                    if tag.get('name'):
+                        # Criar nome de grupo baseado na tag
+                        tag_group_name = f"tag_{self._sanitize_string(tag['name']).lower().replace(' ', '_')}"
+                        self.inventory.add_group(tag_group_name)
+                        self.inventory.add_child(tag_group_name, safe_name)
+                        
+                        # Se houver categoria, criar grupo por categoria também
+                        if tag.get('category'):
+                            category_group_name = f"category_{self._sanitize_string(tag['category']).lower().replace(' ', '_')}"
+                            self.inventory.add_group(category_group_name)
+                            self.inventory.add_child(category_group_name, safe_name)
             
             except Exception as e:
                 # Log do erro mas continua processando outras VMs
@@ -474,6 +456,13 @@ class InventoryModule(BaseInventoryPlugin):
         container.Destroy()
         Disconnect(si)
         
+        # Fechar sessão REST
+        if rest_session:
+            try:
+                rest_session.delete(f"https://{vcenter_config['host']}/rest/com/vmware/cis/session")
+            except:
+                pass
+        
         # Limpar variáveis problemáticas que o AWX pode injetar
         self._cleanup_awx_variables()
         
@@ -482,6 +471,3 @@ class InventoryModule(BaseInventoryPlugin):
         
         # Limpeza final - remover qualquer host que ainda tenha problemas
         self._final_cleanup()
-        
-        # ÚLTIMA tentativa - interceptar método get_option para bloquear injeção AWX
-        self._monkey_patch_awx_injection()

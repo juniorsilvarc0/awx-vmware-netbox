@@ -10,6 +10,23 @@ from ansible.plugins.inventory import BaseInventoryPlugin
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 
+"""
+VMware Dynamic Inventory Plugin com Suporte a Tags
+
+IMPORTANTE - Permissões necessárias no vCenter:
+Para que as tags funcionem corretamente, o usuário precisa das seguintes permissões:
+- System.View (no nível global)
+- System.Read (no nível global)
+- Global.GlobalTag ou "vSphere Tagging" > "Assign or Unassign vSphere Tag"
+
+Se você estiver recebendo erro 403 ao buscar tags, verifique:
+1. No vCenter, vá em Administration > Access Control > Roles
+2. Edite o role do usuário ou crie um novo role
+3. Adicione as permissões: Global > System > View e Read
+4. Em vSphere Tagging, marque "Assign or Unassign vSphere Tag"
+5. Aplique o role ao usuário no nível do vCenter (root)
+"""
+
 class InventoryModule(BaseInventoryPlugin):
     NAME = 'vmware_dynamic'
 
@@ -53,67 +70,122 @@ class InventoryModule(BaseInventoryPlugin):
 
     def _get_vcenter_rest_session(self, vcenter_host, username, password):
         """Cria uma sessão REST autenticada com o vCenter"""
-        session = requests.Session()
-        session.verify = False
-        
-        # Desabilitar avisos SSL
-        import urllib3
-        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-        
-        # Autenticar
-        auth_url = f"https://{vcenter_host}/rest/com/vmware/cis/session"
-        auth_response = session.post(auth_url, auth=(username, password))
-        
-        if auth_response.status_code != 200:
-            print(f"❌ Erro ao autenticar na API REST: {auth_response.status_code}")
+        try:
+            session = requests.Session()
+            session.verify = False
+            
+            # Desabilitar avisos SSL
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+            
+            # Autenticar - tentar diferentes endpoints
+            auth_endpoints = [
+                f"https://{vcenter_host}/rest/com/vmware/cis/session",
+                f"https://{vcenter_host}/api/session"
+            ]
+            
+            for auth_url in auth_endpoints:
+                try:
+                    auth_response = session.post(auth_url, auth=(username, password))
+                    
+                    if auth_response.status_code == 200:
+                        # Diferentes versões do vCenter retornam a sessão de formas diferentes
+                        if 'value' in auth_response.json():
+                            session_id = auth_response.json()['value']
+                            session.headers.update({'vmware-api-session-id': session_id})
+                        else:
+                            session_id = auth_response.json()
+                            session.headers.update({'x-vmware-api-session-id': session_id})
+                        
+                        print(f"✅ Sessão REST criada com sucesso usando {auth_url}")
+                        return session
+                except Exception as e:
+                    print(f"⚠️  Tentativa falhou em {auth_url}: {str(e)}")
+                    continue
+                    
+            print(f"❌ Não foi possível autenticar na API REST")
             return None
             
-        session_id = auth_response.json().get('value')
-        session.headers.update({'vmware-api-session-id': session_id})
-        
-        return session
+        except Exception as e:
+            print(f"❌ Erro ao criar sessão REST: {str(e)}")
+            return None
 
     def _get_vm_tags_via_rest(self, session, vcenter_host, vm_id):
         """Busca tags de uma VM usando a API REST do vCenter"""
-        try:
-            # Buscar tags da VM
-            tags_url = f"https://{vcenter_host}/rest/vcenter/vm/{vm_id}/tags"
-            response = session.get(tags_url)
+        if not session:
+            return []
             
-            if response.status_code != 200:
-                print(f"⚠️  Erro ao buscar tags para VM {vm_id}: {response.status_code}")
+        try:
+            # Tentar diferentes endpoints para tags
+            tag_endpoints = [
+                f"https://{vcenter_host}/rest/vcenter/vm/{vm_id}/tags",
+                f"https://{vcenter_host}/api/vcenter/vm/{vm_id}/tags",
+                f"https://{vcenter_host}/rest/com/vmware/vcenter/vm/{vm_id}/tags"
+            ]
+            
+            tag_ids = []
+            for tags_url in tag_endpoints:
+                try:
+                    response = session.get(tags_url)
+                    if response.status_code == 200:
+                        tag_ids = response.json().get('value', [])
+                        if tag_ids:
+                            print(f"   ✅ Tags encontradas usando endpoint: {tags_url}")
+                            break
+                    elif response.status_code == 403:
+                        print(f"   ⚠️  Erro 403: Verifique se o usuário tem permissão 'System.View' no vCenter")
+                except:
+                    continue
+            
+            if not tag_ids:
                 return []
             
-            tag_ids = response.json().get('value', [])
             tags = []
-            
             # Para cada tag ID, buscar detalhes
             for tag_id in tag_ids:
-                tag_details_url = f"https://{vcenter_host}/rest/com/vmware/cis/tagging/tag/{tag_id}"
-                tag_response = session.get(tag_details_url)
+                # Tentar diferentes endpoints para detalhes da tag
+                tag_detail_endpoints = [
+                    f"https://{vcenter_host}/rest/com/vmware/cis/tagging/tag/{tag_id}",
+                    f"https://{vcenter_host}/api/cis/tagging/tag/{tag_id}"
+                ]
                 
-                if tag_response.status_code == 200:
-                    tag_data = tag_response.json().get('value', {})
-                    
-                    # Buscar detalhes da categoria
-                    category_id = tag_data.get('category_id')
-                    category_name = None
-                    if category_id:
-                        category_url = f"https://{vcenter_host}/rest/com/vmware/cis/tagging/category/{category_id}"
-                        category_response = session.get(category_url)
-                        if category_response.status_code == 200:
-                            category_data = category_response.json().get('value', {})
-                            category_name = category_data.get('name')
-                    
-                    tag_info = {
-                        'name': self._sanitize_string(tag_data.get('name')),
-                        'category': self._sanitize_string(category_name),
-                        'description': self._sanitize_string(tag_data.get('description'))
-                    }
-                    
-                    if tag_info['name']:
-                        tags.append(tag_info)
-                        print(f"   ✅ Tag encontrada: {tag_info['name']} ({tag_info['category']})")
+                for tag_details_url in tag_detail_endpoints:
+                    try:
+                        tag_response = session.get(tag_details_url)
+                        if tag_response.status_code == 200:
+                            tag_data = tag_response.json().get('value', {})
+                            
+                            # Buscar detalhes da categoria
+                            category_id = tag_data.get('category_id')
+                            category_name = None
+                            if category_id:
+                                category_endpoints = [
+                                    f"https://{vcenter_host}/rest/com/vmware/cis/tagging/category/{category_id}",
+                                    f"https://{vcenter_host}/api/cis/tagging/category/{category_id}"
+                                ]
+                                
+                                for category_url in category_endpoints:
+                                    try:
+                                        category_response = session.get(category_url)
+                                        if category_response.status_code == 200:
+                                            category_data = category_response.json().get('value', {})
+                                            category_name = category_data.get('name')
+                                            break
+                                    except:
+                                        continue
+                            
+                            tag_info = {
+                                'name': self._sanitize_string(tag_data.get('name')),
+                                'category': self._sanitize_string(category_name),
+                                'description': self._sanitize_string(tag_data.get('description'))
+                            }
+                            
+                            if tag_info['name']:
+                                tags.append(tag_info)
+                                print(f"   ✅ Tag encontrada: {tag_info['name']} ({tag_info['category']})")
+                            break
+                    except:
+                        continue
             
             return tags
             
@@ -121,7 +193,50 @@ class InventoryModule(BaseInventoryPlugin):
             print(f"❌ Erro ao buscar tags via REST: {str(e)}")
             return []
 
-    def _cleanup_awx_variables(self):
+    def _get_vm_tags_via_pyvmomi(self, content, vm):
+        """Busca tags de uma VM usando pyVmomi como alternativa"""
+        try:
+            # Obter o gerenciador de tags
+            tag_manager = content.tagging.TagManager if hasattr(content, 'tagging') else None
+            if not tag_manager:
+                # Tentar método alternativo
+                tag_manager = content.tagManager if hasattr(content, 'tagManager') else None
+            
+            if not tag_manager:
+                print("   ⚠️  Tag Manager não disponível nesta versão do vCenter")
+                return []
+            
+            # Obter tags associadas à VM
+            tags = []
+            vm_tags = tag_manager.ListAttachedTags(vm)
+            
+            for tag_id in vm_tags:
+                try:
+                    tag = tag_manager.GetTag(tag_id)
+                    category = tag_manager.GetCategory(tag.categoryId)
+                    
+                    tag_info = {
+                        'name': self._sanitize_string(tag.name),
+                        'category': self._sanitize_string(category.name),
+                        'description': self._sanitize_string(tag.description)
+                    }
+                    
+                    if tag_info['name']:
+                        tags.append(tag_info)
+                        print(f"   ✅ Tag encontrada via pyVmomi: {tag_info['name']} ({tag_info['category']})")
+                        
+                except Exception as e:
+                    print(f"   ⚠️  Erro ao processar tag {tag_id}: {str(e)}")
+                    continue
+                    
+            return tags
+            
+        except AttributeError:
+            print("   ℹ️  API de tags não disponível via pyVmomi nesta versão")
+            return []
+        except Exception as e:
+            print(f"   ⚠️  Erro ao buscar tags via pyVmomi: {str(e)}")
+            return []
         """Remove variáveis problemáticas que o AWX pode injetar automaticamente"""
         print("🧹 Executando limpeza agressiva de variáveis AWX...")
         
@@ -286,6 +401,18 @@ class InventoryModule(BaseInventoryPlugin):
             vcenter_config['user'],
             vcenter_config['pwd']
         )
+        
+        if not rest_session:
+            print("""
+⚠️  AVISO: Não foi possível criar sessão REST. As tags não serão coletadas.
+   
+   Se você precisa das tags, verifique:
+   1. Permissões do usuário no vCenter (precisa de System.View e Global.GlobalTag)
+   2. Versão do vCenter (6.5 ou superior para API REST)
+   3. Conectividade com a porta 443 do vCenter
+   
+   O inventário continuará sem as tags...
+""")
 
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         context.check_hostname = False
@@ -346,6 +473,12 @@ class InventoryModule(BaseInventoryPlugin):
                 if rest_session and hasattr(vm, '_moId'):
                     print(f"🔍 Buscando tags para VM: {name} (ID: {vm._moId})")
                     vm_tags = self._get_vm_tags_via_rest(rest_session, vcenter_config['host'], vm._moId)
+                    
+                    # Se falhar via REST, tentar via pyVmomi
+                    if not vm_tags:
+                        print("   🔄 Tentando método alternativo via pyVmomi...")
+                        vm_tags = self._get_vm_tags_via_pyvmomi(content, vm)
+                    
                     print(f"✅ VM {name}: {len(vm_tags)} tags encontradas")
 
                 vm_data = {

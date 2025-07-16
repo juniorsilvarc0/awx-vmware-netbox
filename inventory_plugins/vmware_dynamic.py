@@ -260,6 +260,9 @@ class InventoryModule(BaseInventoryPlugin):
         if not datacenter:
             raise Exception(f"Datacenter {vcenter_config['datacenter']} not found")
 
+        # Preparar coleta de tags usando métodos alternativos
+        print("🏷️ Preparando coleta de tags das VMs...")
+
         container = content.viewManager.CreateContainerView(
             datacenter.vmFolder, [vim.VirtualMachine], True
         )
@@ -296,8 +299,35 @@ class InventoryModule(BaseInventoryPlugin):
 
                 # Coletar tags atribuídas à VM
                 vm_tags = []
+                print(f"🔍 Coletando tags para VM: {name}")
+                
+                # Debug: Verificar propriedades disponíveis
+                print(f"  - VM tem summary: {hasattr(vm, 'summary')}")
+                print(f"  - VM tem tag: {hasattr(vm, 'tag')}")
+                print(f"  - VM tem customValue: {hasattr(vm, 'customValue')}")
+                if hasattr(vm, 'summary'):
+                    print(f"  - Summary tem tag: {hasattr(vm.summary, 'tag')}")
+                if hasattr(vm, 'config'):
+                    print(f"  - Config tem extraConfig: {hasattr(vm.config, 'extraConfig')}")
+                
                 try:
-                    if hasattr(vm, 'tag') and vm.tag:
+                    # Método 1: Tentar coletar tags via summary.tag (mais comum)
+                    if hasattr(vm, 'summary') and hasattr(vm.summary, 'tag') and vm.summary.tag:
+                        for tag in vm.summary.tag:
+                            try:
+                                tag_info = {
+                                    'name': self._sanitize_string(tag.name) if hasattr(tag, 'name') else None,
+                                    'category': self._sanitize_string(tag.category.name) if hasattr(tag, 'category') and tag.category and hasattr(tag.category, 'name') else None,
+                                    'description': self._sanitize_string(tag.description) if hasattr(tag, 'description') else None
+                                }
+                                if tag_info['name']:
+                                    vm_tags.append(tag_info)
+                            except Exception as e:
+                                print(f"Erro processando tag summary para VM {name}: {str(e)}")
+                                continue
+                    
+                    # Método 2: Tentar via propriedade tag da VM diretamente
+                    if not vm_tags and hasattr(vm, 'tag') and vm.tag:
                         for tag in vm.tag:
                             try:
                                 tag_info = {
@@ -305,15 +335,49 @@ class InventoryModule(BaseInventoryPlugin):
                                     'category': self._sanitize_string(tag.category.name) if hasattr(tag, 'category') and tag.category and hasattr(tag.category, 'name') else None,
                                     'description': self._sanitize_string(tag.description) if hasattr(tag, 'description') else None
                                 }
-                                # Apenas adicionar se tem pelo menos o nome
                                 if tag_info['name']:
                                     vm_tags.append(tag_info)
                             except Exception as e:
                                 print(f"Erro processando tag para VM {name}: {str(e)}")
                                 continue
+                    
+                    # Método 3: Tentar via config.extraConfig para tags personalizadas
+                    if not vm_tags and config and hasattr(config, 'extraConfig') and config.extraConfig:
+                        for extra_config in config.extraConfig:
+                            if hasattr(extra_config, 'key') and 'tag' in extra_config.key.lower():
+                                try:
+                                    tag_info = {
+                                        'name': self._sanitize_string(extra_config.key),
+                                        'category': 'extraConfig',
+                                        'description': self._sanitize_string(extra_config.value) if hasattr(extra_config, 'value') else None
+                                    }
+                                    if tag_info['name']:
+                                        vm_tags.append(tag_info)
+                                except Exception as e:
+                                    print(f"Erro processando extraConfig para VM {name}: {str(e)}")
+                                    continue
+                    
+                    # Método 4: Tentar via customValue (custom attributes)
+                    if not vm_tags and hasattr(vm, 'customValue') and vm.customValue:
+                        for custom_val in vm.customValue:
+                            try:
+                                if hasattr(custom_val, 'key') and hasattr(custom_val.key, 'name'):
+                                    tag_info = {
+                                        'name': self._sanitize_string(custom_val.key.name),
+                                        'category': 'custom_attribute',
+                                        'description': self._sanitize_string(custom_val.value) if hasattr(custom_val, 'value') else None
+                                    }
+                                    if tag_info['name']:
+                                        vm_tags.append(tag_info)
+                            except Exception as e:
+                                print(f"Erro processando customValue para VM {name}: {str(e)}")
+                                continue
+                
                 except Exception as e:
-                    print(f"Erro coletando tags para VM {name}: {str(e)}")
+                    print(f"Erro geral coletando tags para VM {name}: {str(e)}")
                     vm_tags = []
+                
+                print(f"✅ VM {name}: {len(vm_tags)} tags coletadas")
 
                 vm_data = {
                     'ansible_host': ip_addresses[0] if ip_addresses else None,

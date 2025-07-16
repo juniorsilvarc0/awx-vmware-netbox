@@ -294,6 +294,27 @@ class InventoryModule(BaseInventoryPlugin):
                         if hasattr(device, 'capacityInKB') and device.capacityInKB:
                             disk_total_gb += round((device.capacityInKB / 1024 / 1024), 1)
 
+                # Coletar tags atribuídas à VM
+                vm_tags = []
+                try:
+                    if hasattr(vm, 'tag') and vm.tag:
+                        for tag in vm.tag:
+                            try:
+                                tag_info = {
+                                    'name': self._sanitize_string(tag.name) if hasattr(tag, 'name') else None,
+                                    'category': self._sanitize_string(tag.category.name) if hasattr(tag, 'category') and tag.category and hasattr(tag.category, 'name') else None,
+                                    'description': self._sanitize_string(tag.description) if hasattr(tag, 'description') else None
+                                }
+                                # Apenas adicionar se tem pelo menos o nome
+                                if tag_info['name']:
+                                    vm_tags.append(tag_info)
+                            except Exception as e:
+                                print(f"Erro processando tag para VM {name}: {str(e)}")
+                                continue
+                except Exception as e:
+                    print(f"Erro coletando tags para VM {name}: {str(e)}")
+                    vm_tags = []
+
                 vm_data = {
                     'ansible_host': ip_addresses[0] if ip_addresses else None,
                     'vm_name': self._sanitize_string(name),
@@ -318,7 +339,8 @@ class InventoryModule(BaseInventoryPlugin):
                     'vm_cpu_category': 'high' if summary.config.numCpu >= 8 else 'medium' if summary.config.numCpu >= 4 else 'low',
                     'vm_memory_category': 'high' if memory_gb >= 16 else 'medium' if memory_gb >= 8 else 'low' if memory_gb >= 4 else 'minimal',
                     'vm_disk_total_gb': disk_total_gb,
-                    'vm_disk_category': 'high' if disk_total_gb >= 1000 else 'medium' if disk_total_gb >= 500 else 'low' if disk_total_gb >= 100 else 'minimal'
+                    'vm_disk_category': 'high' if disk_total_gb >= 1000 else 'medium' if disk_total_gb >= 500 else 'low' if disk_total_gb >= 100 else 'minimal',
+                    'vm_tags': vm_tags
                 }
 
                 # Sanitizar nome do host para evitar problemas

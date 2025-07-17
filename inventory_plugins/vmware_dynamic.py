@@ -78,131 +78,112 @@ class InventoryModule(BaseInventoryPlugin):
             import urllib3
             urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
             
-            # Autenticar - tentar diferentes endpoints
-            auth_endpoints = [
-                f"https://{vcenter_host}/rest/com/vmware/cis/session",
-                f"https://{vcenter_host}/api/session"
-            ]
+            # Autenticar usando o endpoint que funciona
+            auth_url = f"https://{vcenter_host}/rest/com/vmware/cis/session"
             
-            for auth_url in auth_endpoints:
-                try:
-                    auth_response = session.post(auth_url, auth=(username, password))
+            try:
+                auth_response = session.post(auth_url, auth=(username, password), timeout=30)
+                
+                if auth_response.status_code == 200:
+                    session_id = auth_response.json()['value']
+                    session.headers.update({'vmware-api-session-id': session_id})
+                    print(f"✅ Sessão REST criada com sucesso")
+                    return session
+                else:
+                    print(f"❌ Erro na autenticação: {auth_response.status_code}")
+                    return None
                     
-                    if auth_response.status_code == 200:
-                        # Diferentes versões do vCenter retornam a sessão de formas diferentes
-                        if 'value' in auth_response.json():
-                            session_id = auth_response.json()['value']
-                            session.headers.update({'vmware-api-session-id': session_id})
-                        else:
-                            session_id = auth_response.json()
-                            session.headers.update({'x-vmware-api-session-id': session_id})
-                        
-                        print(f"✅ Sessão REST criada com sucesso usando {auth_url}")
-                        return session
-                except Exception as e:
-                    print(f"⚠️  Tentativa falhou em {auth_url}: {str(e)}")
-                    continue
+            except Exception as e:
+                print(f"❌ Erro ao autenticar: {str(e)}")
+                return None
                     
-            print(f"❌ Não foi possível autenticar na API REST")
-            return None
-            
         except Exception as e:
             print(f"❌ Erro ao criar sessão REST: {str(e)}")
             return None
 
     def _get_vm_tags_via_rest(self, session, vcenter_host, vm_id):
-        """Busca tags de uma VM usando a API REST do vCenter"""
+        """Busca tags de uma VM usando a API REST do vCenter - MÉTODO CORRIGIDO"""
         if not session:
             return []
             
         try:
-            # Usar endpoint correto conforme documentação
-            tags_url = f"https://{vcenter_host}/rest/vcenter/vm/{vm_id}/tags"
+            # Usar o endpoint de tagging association que funciona com permissões básicas
+            tags_url = f"https://{vcenter_host}/rest/com/vmware/cis/tagging/tag-association?~action=list-attached-tags"
             
-            print(f"   🔍 Buscando tags em: {tags_url}")
-            response = session.get(tags_url)
+            headers = {
+                'vmware-api-session-id': session.headers.get('vmware-api-session-id'),
+                'content-type': 'application/json'
+            }
+            
+            # Payload para buscar tags da VM
+            payload = {
+                "object_id": {
+                    "type": "VirtualMachine",
+                    "id": vm_id
+                }
+            }
+            
+            print(f"   🔍 Buscando tags para VM ID: {vm_id}")
+            response = session.post(tags_url, headers=headers, data=json.dumps(payload), timeout=30)
             
             if response.status_code == 200:
                 tag_ids = response.json().get('value', [])
-                print(f"   ✅ Resposta da API: {len(tag_ids)} tag IDs encontrados")
+                print(f"   ✅ {len(tag_ids)} tag IDs encontrados")
                 
                 if not tag_ids:
                     print(f"   ℹ️  VM não possui tags atribuídas")
                     return []
                 
                 tags = []
-                # Para cada tag ID, buscar detalhes usando a API CIS
+                # Para cada tag ID, buscar detalhes
                 for tag_id in tag_ids:
                     print(f"   🔍 Buscando detalhes da tag: {tag_id}")
                     
-                    # Endpoints para detalhes da tag
-                    tag_detail_endpoints = [
-                        f"https://{vcenter_host}/rest/com/vmware/cis/tagging/tag/id:{tag_id}",
-                        f"https://{vcenter_host}/api/cis/tagging/tag/id:{tag_id}",
-                        f"https://{vcenter_host}/rest/com/vmware/cis/tagging/tag/{tag_id}",
-                        f"https://{vcenter_host}/api/cis/tagging/tag/{tag_id}"
-                    ]
+                    # Endpoint para detalhes da tag
+                    tag_details_url = f"https://{vcenter_host}/rest/com/vmware/cis/tagging/tag/id:{tag_id}"
                     
-                    tag_found = False
-                    for tag_details_url in tag_detail_endpoints:
-                        try:
-                            print(f"     🔍 Tentando: {tag_details_url}")
-                            tag_response = session.get(tag_details_url)
+                    try:
+                        tag_response = session.get(tag_details_url, headers={'vmware-api-session-id': session.headers.get('vmware-api-session-id')}, timeout=30)
+                        
+                        if tag_response.status_code == 200:
+                            tag_data = tag_response.json().get('value', {})
+                            print(f"     ✅ Tag encontrada: {tag_data.get('name')}")
                             
-                            if tag_response.status_code == 200:
-                                tag_data = tag_response.json().get('value', {})
-                                print(f"     ✅ Tag encontrada: {tag_data}")
-                                
-                                # Buscar detalhes da categoria
-                                category_id = tag_data.get('category_id')
-                                category_name = None
-                                
-                                if category_id:
-                                    category_endpoints = [
-                                        f"https://{vcenter_host}/rest/com/vmware/cis/tagging/category/id:{category_id}",
-                                        f"https://{vcenter_host}/api/cis/tagging/category/id:{category_id}",
-                                        f"https://{vcenter_host}/rest/com/vmware/cis/tagging/category/{category_id}",
-                                        f"https://{vcenter_host}/api/cis/tagging/category/{category_id}"
-                                    ]
-                                    
-                                    for category_url in category_endpoints:
-                                        try:
-                                            category_response = session.get(category_url)
-                                            if category_response.status_code == 200:
-                                                category_data = category_response.json().get('value', {})
-                                                category_name = category_data.get('name')
-                                                print(f"     ✅ Categoria encontrada: {category_name}")
-                                                break
-                                        except Exception as cat_e:
-                                            print(f"     ⚠️  Erro na categoria: {str(cat_e)}")
-                                            continue
-                                
-                                tag_info = {
-                                    'name': self._sanitize_string(tag_data.get('name')),
-                                    'category': self._sanitize_string(category_name),
-                                    'description': self._sanitize_string(tag_data.get('description'))
-                                }
-                                
-                                if tag_info['name']:
-                                    tags.append(tag_info)
-                                    print(f"   ✅ Tag processada: {tag_info['name']} (categoria: {tag_info['category']})")
-                                
-                                tag_found = True
-                                break
-                                
-                            elif tag_response.status_code == 403:
-                                print(f"     ⚠️  Erro 403: Sem permissão para acessar detalhes da tag")
-                            elif tag_response.status_code == 404:
-                                print(f"     ⚠️  Tag {tag_id} não encontrada")
-                            else:
-                                print(f"     ⚠️  Status {tag_response.status_code}: {tag_response.text}")
-                                
-                        except Exception as e:
-                            print(f"     ❌ Erro ao buscar tag: {str(e)}")
-                            continue
-                    
-                    if not tag_found:
-                        print(f"   ⚠️  Não foi possível obter detalhes da tag {tag_id}")
+                            # Buscar detalhes da categoria
+                            category_id = tag_data.get('category_id')
+                            category_name = None
+                            
+                            if category_id:
+                                category_url = f"https://{vcenter_host}/rest/com/vmware/cis/tagging/category/id:{category_id}"
+                                try:
+                                    category_response = session.get(category_url, headers={'vmware-api-session-id': session.headers.get('vmware-api-session-id')}, timeout=30)
+                                    if category_response.status_code == 200:
+                                        category_data = category_response.json().get('value', {})
+                                        category_name = category_data.get('name')
+                                        print(f"     ✅ Categoria encontrada: {category_name}")
+                                except Exception as cat_e:
+                                    print(f"     ⚠️  Erro na categoria: {str(cat_e)}")
+                            
+                            tag_info = {
+                                'name': self._sanitize_string(tag_data.get('name')),
+                                'category': self._sanitize_string(category_name),
+                                'description': self._sanitize_string(tag_data.get('description'))
+                            }
+                            
+                            if tag_info['name']:
+                                tags.append(tag_info)
+                                print(f"   ✅ Tag processada: {tag_info['name']} (categoria: {tag_info['category']})")
+                            
+                        elif tag_response.status_code == 403:
+                            print(f"     ⚠️  Erro 403: Sem permissão para acessar detalhes da tag")
+                        elif tag_response.status_code == 404:
+                            print(f"     ⚠️  Tag {tag_id} não encontrada")
+                        else:
+                            print(f"     ⚠️  Status {tag_response.status_code}: {tag_response.text}")
+                            
+                    except Exception as e:
+                        print(f"     ❌ Erro ao buscar tag: {str(e)}")
+                        continue
                 
                 return tags
                 
@@ -496,7 +477,7 @@ class InventoryModule(BaseInventoryPlugin):
                         if hasattr(device, 'capacityInKB') and device.capacityInKB:
                             disk_total_gb += round((device.capacityInKB / 1024 / 1024), 1)
 
-                # Buscar tags via API REST
+                # Buscar tags via API REST - MÉTODO CORRIGIDO
                 vm_tags = []
                 if rest_session and hasattr(vm, '_moId'):
                     print(f"🔍 Buscando tags para VM: {name} (ID: {vm._moId})")

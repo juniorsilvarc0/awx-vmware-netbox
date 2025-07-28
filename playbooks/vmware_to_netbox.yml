@@ -1,5 +1,8 @@
+Claro, aqui está o playbook `vmware_to_netbox.yml` completo, já com as novas tarefas para extrair e associar a "Função de Dispositivo" a partir das tags da VM.
+
+```yaml
 ---
-- name: Sincronizar VMs do AWX para o NetBox
+- name: Sincronizar VMs do VMware para o NetBox
   hosts: all
   gather_facts: false
   vars:
@@ -29,10 +32,10 @@
       set_fact:
         is_valid_vm: >-
           {{
-            vm_name is defined and 
-            vm_name != 'localhost' and 
-            vm_name != inventory_hostname and 
-            vm_name != 'N/A' and 
+            vm_name is defined and
+            vm_name != 'localhost' and
+            vm_name != inventory_hostname and
+            vm_name != 'N/A' and
             vm_name != ''
           }}
 
@@ -182,22 +185,41 @@
       set_fact:
         vm_id: "{{ (vm_check_response.json.results | first).id if vm_check_response.json.results else none }}"
 
-    - name: Montar payload da VM
+    - name: "🔎 Extrair o nome da Função da tag da VM"
+      set_fact:
+        vm_role_name: "{{ (vm_tags | selectattr('category', 'eq', 'Função') | map(attribute='name') | first) | default(omit) }}"
+      when: vm_tags is defined and vm_tags | length > 0
+
+    - name: "☁️ Garantir que a Função de Dispositivo exista no NetBox"
+      netbox.netbox.netbox_device_role:
+        netbox_url: "{{ netbox_url }}"
+        netbox_token: "{{ netbox_token }}"
+        data:
+          name: "{{ vm_role_name }}"
+          vm_role: true
+          color: "00bcd4"
+        state: present
+        validate_certs: false
+      register: device_role_result
+      when: vm_role_name is defined and vm_role_name != ""
+
+    - name: "📝 Montar payload da VM"
       set_fact:
         vm_payload:
           name: "{{ vm_name }}"
           status: "{{ 'active' if vm_power_state == 'poweredOn' else 'offline' }}"
           site: "{{ site_id | default(omit) }}"
           cluster: "{{ cluster_id | default(omit) }}"
+          role: "{{ device_role_result.role.id | default(omit) }}"
           vcpus: "{{ vm_cpu_count | default(1) | int }}"
           memory: "{{ vm_memory_mb | default(1024) | int }}"
           disk: 100
-        comments: |
-          Sincronizado via AWX
-          Host: {{ inventory_hostname }}
-          UUID: {{ vm_uuid | default('N/A') }}
-          Ambiente: {{ vm_environment | default('unknown') }}
-          Criticidade: {{ vm_criticality | default('low') }}
+          comments: |
+            Sincronizado via AWX
+            Host: {{ inventory_hostname }}
+            UUID: {{ vm_uuid | default('N/A') }}
+            Ambiente: {{ vm_environment | default('unknown') }}
+            Criticidade: {{ vm_criticality | default('low') }}
 
     - name: Criar ou atualizar VM no NetBox
       uri:
@@ -222,3 +244,4 @@
           - "Status HTTP: {{ vm_result.status }}"
           - "{{ 'CRIADA' if vm_result.status == 201 else 'ATUALIZADA' if vm_result.status == 200 else 'ERRO' }}"
           - "NetBox ID: {{ vm_result.json.id }}"
+```

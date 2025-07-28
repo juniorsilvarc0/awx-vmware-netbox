@@ -34,14 +34,14 @@ class InventoryModule(BaseInventoryPlugin):
         return path.endswith(('inventory.yml', 'vmware_inventory.yml'))
 
     def _sanitize_string(self, value):
-        """Sanitiza strings para evitar problemas de JSON/YAML"""
+        """Sanitiza strings para evitar problemas de JSON/YAML, preservando acentos."""
         if value is None:
             return None
         if isinstance(value, str):
-            # Remove caracteres de controle e caracteres problemáticos
+            # Remove caracteres de controle, que são invisíveis e quebram o JSON
             value = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', value)
             
-            # Remove sequências problemáticas que podem quebrar JSON
+            # Remove sequências problemáticas que podem quebrar JSON/YAML
             problematic_patterns = [
                 r'"[^"]*"[^"]*"[^"]*"',  # Múltiplas aspas duplas
                 r"'[^']*'[^']*'[^']*'",  # Múltiplas aspas simples
@@ -54,15 +54,18 @@ class InventoryModule(BaseInventoryPlugin):
             for pattern in problematic_patterns:
                 value = re.sub(pattern, '', value)
             
-            # Sanitização básica
+            # Sanitização básica que não afeta os acentos
             value = value.replace('"', "'").replace("'", "").replace('\n', ' ').replace('\r', ' ')
             value = value.replace('\\', '/').replace('{', '').replace('}', '')
             
-            # Remove espaços múltiplos e caracteres não ASCII problemáticos
-            value = re.sub(r'\s+', ' ', value)
-            value = re.sub(r'[^\x20-\x7E]', '', value)  # Apenas ASCII printável
+            # A LINHA PROBLEMÁTICA FOI REMOVIDA DAQUI
+            # A linha original `re.sub(r'[^\x20-\x7E]', '', value)` removia todos os caracteres não-ASCII.
             
-            # Remove caracteres que podem quebrar parsing JSON/YAML
+            # Remove espaços múltiplos
+            value = re.sub(r'\s+', ' ', value)
+            
+            # Remove caracteres que podem quebrar o parsing de forma agressiva.
+            # Esta parte da lógica original foi mantida para segurança.
             value = value.replace(':', '').replace(',', '').replace('[', '').replace(']', '')
             
             return value.strip()
